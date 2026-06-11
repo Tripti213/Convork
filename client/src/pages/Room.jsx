@@ -23,72 +23,73 @@ export default function Room() {
   const { socket, emit, on, disconnect } = useSocket(token);
 
   const {
-    localStream,
-    screenStream,
-    localVideoRef,
-    audioEnabled,
-    videoEnabled,
-    isSharingScreen,
-    mediaError,
-    startMedia,
-    toggleAudio,
-    toggleVideo,
-    startScreenShare,
-    stopScreenShare,
+    localStream, screenStream, localVideoRef,
+    audioEnabled, videoEnabled, isSharingScreen,
+    mediaError, startMedia, toggleAudio, toggleVideo,
+    startScreenShare, stopScreenShare,
   } = useMedia();
 
   const { peers, replaceTrack, destroyAll } = useWebRTC({ socket, roomId, localStream });
 
-  const [sidebarTab, setSidebarTab] = useState("people"); // people | chat | files
-  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
-  const [pinnedSocketId, setPinnedSocketId] = useState(null);
-  const [reactions, setReactions] = useState([]); // { id, emoji, name }
+  const [sidebarTab, setSidebarTab] = useState("people");
+  const [isWhiteboardOpen, setWhiteboard] = useState(false);
+  const [pinnedSocketId, setPinned] = useState(null);
+  const [reactions, setReactions] = useState([]);
   const [elapsed, setElapsed] = useState(0);
   const [mediaReady, setMediaReady] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [unreadChat, setUnreadChat] = useState(0);
 
-  // ─── Start media and join room ─────────────────────────────────────────────
+  // ── Boot ────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const init = async () => {
-      const stream = await startMedia();
-      if (stream) {
-        setMediaReady(true);
-      }
-    };
-    init();
+    startMedia().then(s => s && setMediaReady(true));
   }, []);
 
-  // Join socket room once media and socket are ready
   useEffect(() => {
-    if (!mediaReady || !socket.current) return;
-    emit("join-room", { roomId, avatarColor: user?.avatarColor });
+    if (mediaReady && socket.current) {
+      emit("join-room", { roomId, avatarColor: user?.avatarColor });
+    }
   }, [mediaReady, socket.current]);
 
-  // ─── Meeting timer ─────────────────────────────────────────────────────────
+  // ── Timer ───────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const interval = setInterval(() => setElapsed((e) => e + 1), 1000);
-    return () => clearInterval(interval);
+    const t = setInterval(() => setElapsed(e => e + 1), 1000);
+    return () => clearInterval(t);
   }, []);
 
-  const formatElapsed = (s) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return h > 0
-      ? `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
-      : `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-  };
-
-  // ─── Reactions from others ─────────────────────────────────────────────────
+  // ── Reactions ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const unsub = on("reaction", ({ name, emoji }) => {
       const id = Date.now() + Math.random();
-      setReactions((prev) => [...prev, { id, emoji, name }]);
-      setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 2500);
+      setReactions(p => [...p, { id, emoji, name }]);
+      setTimeout(() => setReactions(p => p.filter(r => r.id !== id)), 2800);
     });
     return unsub;
   }, [on]);
 
-  // ─── Screen share ──────────────────────────────────────────────────────────
+  // ── Unread chat badge ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const unsub = on("chat-message", () => {
+      if (sidebarTab !== "chat") setUnreadChat(n => n + 1);
+    });
+    return unsub;
+  }, [on, sidebarTab]);
+
+  useEffect(() => {
+    if (sidebarTab === "chat") setUnreadChat(0);
+  }, [sidebarTab]);
+
+  useEffect(() => {
+  const handlePopState = () => {
+    destroyAll();
+    localStream?.getTracks().forEach(t => t.stop());
+    disconnect();
+  };
+  window.addEventListener("popstate", handlePopState);
+  return () => window.removeEventListener("popstate", handlePopState);
+}, [localStream]);
+
+  // ── Screen share ─────────────────────────────────────────────────────────────
   const handleToggleScreen = useCallback(async () => {
     if (isSharingScreen) {
       const originalTrack = stopScreenShare(screenStream);
@@ -101,135 +102,200 @@ export default function Room() {
       const displayStream = await startScreenShare();
       if (displayStream) {
         const screenTrack = displayStream.getVideoTracks()[0];
-        const localVideoTrack = localStream?.getVideoTracks()[0];
-        if (localVideoTrack) replaceTrack(localVideoTrack, screenTrack);
+        const localVidTrack = localStream?.getVideoTracks()[0];
+        if (localVidTrack) replaceTrack(localVidTrack, screenTrack);
         emit("screen-share-started", { roomId });
       }
     }
   }, [isSharingScreen, screenStream, localStream, roomId]);
 
-  // ─── Toggle audio/video and broadcast state ────────────────────────────────
   const handleToggleAudio = () => {
-    const enabled = toggleAudio();
-    emit("media-state", { roomId, audio: enabled, video: videoEnabled });
+    const e = toggleAudio();
+    emit("media-state", { roomId, audio: e, video: videoEnabled });
   };
 
   const handleToggleVideo = () => {
-    const enabled = toggleVideo();
-    emit("media-state", { roomId, audio: audioEnabled, video: enabled });
+    const e = toggleVideo();
+    emit("media-state", { roomId, audio: audioEnabled, video: e });
   };
 
-  // ─── Leave room ────────────────────────────────────────────────────────────
   const handleLeave = () => {
     destroyAll();
-    localStream?.getTracks().forEach((t) => t.stop());
+    localStream?.getTracks().forEach(t => t.stop());
     disconnect();
-    navigate("/dashboard");
+    navigate("/dashboard", { replace: true });
   };
 
-  // ─── Reactions ─────────────────────────────────────────────────────────────
-  const handleReaction = (emoji) => {
-    emit("reaction", { roomId, emoji });
+  const handleReaction = (emoji) => emit("reaction", { roomId, emoji });
+
+  const copyCode = () => {
+    navigator.clipboard.writeText(roomCode);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
   };
 
-  // ─── Compute video grid columns ───────────────────────────────────────────
-  const totalTiles = peers.length + 1; // +1 for local
+  const formatTime = (s) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h > 0
+      ? `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+      : `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  };
+
+  const totalTiles = peers.length + 1;
   const gridCols = totalTiles <= 1 ? 1 : totalTiles <= 4 ? 2 : 3;
 
-  if (mediaError) {
-    return (
-      <div style={styles.errorPage}>
-        <div style={styles.errorCard}>
-          <div style={{ fontSize: 32 }}>📷</div>
-          <h2 style={{ color: "#e8eaed", marginBottom: 8 }}>Camera/Mic Access Required</h2>
-          <p style={{ color: "#7c8490", marginBottom: 16, textAlign: "center" }}>{mediaError}</p>
-          <button style={styles.retryBtn} onClick={() => window.location.reload()}>
-            Retry
-          </button>
-        </div>
+  // ── Media error screen ───────────────────────────────────────────────────────
+  if (mediaError) return (
+    <div style={s.errorPage}>
+      <div style={s.errorBg1} />
+      <div style={s.errorBg2} />
+      <div style={s.errorCard}>
+        <div style={s.errorIcon}>📷</div>
+        <h2 style={s.errorTitle}>Camera / Mic Required</h2>
+        <p style={s.errorDesc}>{mediaError}</p>
+        <button style={s.retryBtn} onClick={() => window.location.reload()}>
+          Try again →
+        </button>
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <div style={styles.page}>
-      {/* TOP BAR */}
-      <div style={styles.topbar}>
-        <div style={styles.brand}>
-          <div style={styles.brandDot} />
-          Convork
-        </div>
-        <div style={styles.roomInfo}>
-          <div style={styles.liveDot} />
-          <span>{roomName}</span>
-          <span style={styles.roomCode}>{roomCode}</span>
-        </div>
-        <div style={styles.topRight}>
-          <span style={styles.timer}>{formatElapsed(elapsed)}</span>
-          <button
-            style={styles.iconBtn}
-            onClick={() => navigator.clipboard.writeText(roomCode)}
-            title="Copy room code"
-          >
-            🔗
-          </button>
-        </div>
+    <div style={s.page}>
+      {/* ── Subtle room background ── */}
+      <div style={s.roomBg}>
+        <div style={s.bgGlow1} />
+        <div style={s.bgGlow2} />
+        <div style={s.bgGrid} />
+        {/* Corner geometric accents */}
+        <svg style={s.cornerGeo} viewBox="0 0 400 300" preserveAspectRatio="xMaxYMin meet">
+          <polygon points="320,20 370,-10 420,20 420,80 370,110 320,80" fill="none" stroke="rgba(108,99,255,0.08)" strokeWidth="1" style={{ animation: "geo-spin 50s linear infinite", transformOrigin: "370px 50px" }} />
+          <circle cx="380" cy="200" r="50" fill="none" stroke="rgba(167,139,250,0.05)" strokeWidth="1" strokeDasharray="8 6" style={{ animation: "geo-spin 35s linear infinite reverse" }} />
+        </svg>
+        <svg style={s.cornerGeo2} viewBox="0 0 400 300" preserveAspectRatio="xMinYMax meet">
+          <polygon points="20,200 70,172 120,200 120,256 70,284 20,256" fill="none" stroke="rgba(16,217,160,0.07)" strokeWidth="1" style={{ animation: "geo-spin 44s linear infinite reverse", transformOrigin: "70px 228px" }} />
+          <polygon points="160,240 200,210 240,240 200,270" fill="none" stroke="rgba(108,99,255,0.06)" strokeWidth="1" style={{ animation: "geo-float 10s ease-in-out infinite" }} />
+        </svg>
       </div>
 
-      {/* MAIN */}
-      <div style={styles.main}>
-        {/* VIDEO AREA */}
-        <div style={styles.videoArea}>
+      {/* ── Top bar ── */}
+      <header style={s.topbar}>
+        {/* Left */}
+        <div style={s.topLeft}>
+          <div style={s.brandMark}>
+            <ConvorkMark size={22} />
+          </div>
+          <span style={s.brandName}>Convork</span>
+          <div style={s.topDivider} />
+          <div style={s.roomChip}>
+            <span style={s.liveRing} />
+            <span style={s.roomChipName}>{roomName}</span>
+          </div>
+        </div>
+
+        {/* Center */}
+        <div style={s.topCenter}>
+          <div style={s.timerPill}>
+            <span style={s.timerRecDot} />
+            <span style={s.timerVal}>{formatTime(elapsed)}</span>
+          </div>
+        </div>
+
+        {/* Right */}
+        <div style={s.topRight}>
+          {/* Participants count */}
+          <div style={s.peerCount}>
+            <span style={s.peerDot} />
+            <span>{peers.length + 1}</span>
+          </div>
+
+          {/* Room code copy */}
+          <button
+            style={{ ...s.codeBtn, ...(codeCopied ? s.codeBtnDone : {}) }}
+            onClick={copyCode}
+          >
+            <span style={s.codeMono}>{roomCode}</span>
+            <span style={s.codeIcon}>{codeCopied ? "✓" : "⎘"}</span>
+          </button>
+
+          {/* Screen sharing indicator */}
+          {isSharingScreen && (
+            <div style={s.sharingBadge}>
+              <span style={s.sharingDot} />
+              Sharing
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* ── Main layout ── */}
+      <div style={s.main}>
+
+        {/* ── Video area ── */}
+        <div style={s.videoArea}>
+
           {/* Whiteboard overlay */}
           {isWhiteboardOpen && (
-            <div style={styles.whiteboardOverlay}>
+            <div style={s.wbOverlay}>
               <Whiteboard
                 socket={socket}
                 roomId={roomId}
-                onClose={() => setIsWhiteboardOpen(false)}
+                onClose={() => setWhiteboard(false)}
               />
             </div>
           )}
 
           {/* Video grid */}
-          <div style={{ ...styles.videoGrid, gridTemplateColumns: `repeat(${gridCols}, 1fr)` }}>
+          <div style={{
+            ...s.videoGrid,
+            gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
+          }}>
             {/* Local tile */}
             <VideoTile
               stream={localStream}
               name={user?.name}
-              avatarColor={user?.avatarColor}
-              isLocal={true}
+              avatarColor={user?.avatarColor || "#6c63ff"}
+              isLocal
               isMuted={!audioEnabled}
               isCamOff={!videoEnabled}
               isPinned={pinnedSocketId === "local"}
-              onPin={() => setPinnedSocketId(pinnedSocketId === "local" ? null : "local")}
+              onPin={() => setPinned(pinnedSocketId === "local" ? null : "local")}
             />
 
             {/* Remote peers */}
-            {peers.map((peer) => (
+            {peers.map(peer => (
               <VideoTile
                 key={peer.socketId}
                 stream={peer.stream}
                 name={peer.name}
                 avatarColor={peer.avatarColor}
-                isLocal={false}
                 isPinned={pinnedSocketId === peer.socketId}
-                onPin={() => setPinnedSocketId(pinnedSocketId === peer.socketId ? null : peer.socketId)}
+                onPin={() => setPinned(pinnedSocketId === peer.socketId ? null : peer.socketId)}
               />
             ))}
           </div>
 
           {/* Floating reactions */}
-          <div style={styles.reactionsContainer}>
-            {reactions.map((r) => (
-              <div key={r.id} style={styles.reactionFloat}>
-                <span style={styles.reactionEmoji}>{r.emoji}</span>
-                <span style={styles.reactionName}>{r.name}</span>
-              </div>
-            ))}
-          </div>
+          {reactions.length > 0 && (
+            <div style={s.reactionsWrap}>
+              {reactions.map(r => (
+                <div key={r.id} style={s.reactionItem}>
+                  <div style={s.reactionBubble}>
+                    <span style={s.reactionEmoji}>{r.emoji}</span>
+                  </div>
+                  <span style={s.reactionName}>{r.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
-          {/* Controls */}
+
+        </div>
+
+        {/* Floating Overlaid Controls */}
+        <div style={s.controlsWrapper}>
           <Controls
             audioEnabled={audioEnabled}
             videoEnabled={videoEnabled}
@@ -238,77 +304,191 @@ export default function Room() {
             onToggleAudio={handleToggleAudio}
             onToggleVideo={handleToggleVideo}
             onToggleScreen={handleToggleScreen}
-            onToggleWhiteboard={() => setIsWhiteboardOpen((v) => !v)}
+            onToggleWhiteboard={() => setWhiteboard(v => !v)}
             onReaction={handleReaction}
             onLeave={handleLeave}
           />
         </div>
 
-        {/* SIDEBAR */}
-        <div style={styles.sidebar}>
+        {/* ── Sidebar ── */}
+        <aside style={s.sidebar}>
           {/* Tabs */}
-          <div style={styles.tabs}>
+          <div style={s.sidebarTabs}>
             {[
-              { id: "people", label: `People (${peers.length + 1})` },
-              { id: "chat", label: "Chat" },
-              { id: "files", label: "Files" },
-            ].map(({ id, label }) => (
+              { id: "people", icon: "👥", label: "People", count: peers.length + 1 },
+              { id: "chat", icon: "💬", label: "Chat", badge: unreadChat },
+              { id: "files", icon: "📁", label: "Files" },
+            ].map(({ id, icon, label, count, badge }) => (
               <button
                 key={id}
-                style={{ ...styles.tab, ...(sidebarTab === id ? styles.tabActive : {}) }}
+                style={{ ...s.sidebarTab, ...(sidebarTab === id ? s.sidebarTabActive : {}) }}
                 onClick={() => setSidebarTab(id)}
               >
-                {label}
+                <span style={s.tabIcon}>{icon}</span>
+                <span>{label}</span>
+                {count !== undefined && (
+                  <span style={s.tabCountBadge}>{count}</span>
+                )}
+                {badge > 0 && (
+                  <span style={s.tabUnreadBadge}>{badge}</span>
+                )}
               </button>
             ))}
           </div>
 
-          {/* Tab panels */}
-          {sidebarTab === "people" && (
-            <ParticipantsPanel
-              peers={peers}
-              localUser={user}
-              socket={socket}
-              roomId={roomId}
-              isHost={true}
-            />
-          )}
-          {sidebarTab === "chat" && (
-            <ChatPanel socket={socket} roomId={roomId} user={user} />
-          )}
-          {sidebarTab === "files" && (
-            <FilesPanel socket={socket} roomId={roomId} token={token} />
-          )}
-        </div>
+          {/* Panel */}
+          <div style={s.sidebarPanel}>
+            {sidebarTab === "people" && (
+              <ParticipantsPanel
+                peers={peers}
+                localUser={user}
+                socket={socket}
+                roomId={roomId}
+                isHost
+              />
+            )}
+            {sidebarTab === "chat" && (
+              <ChatPanel socket={socket} roomId={roomId} user={user} />
+            )}
+            {sidebarTab === "files" && (
+              <FilesPanel socket={socket} roomId={roomId} token={token} />
+            )}
+          </div>
+        </aside>
       </div>
+
+      <style>{`
+        @keyframes geo-spin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+        @keyframes geo-float {
+          0%, 100% { transform: translateY(0); }
+          50%       { transform: translateY(-12px); }
+        }
+        @keyframes float-reaction {
+          0%   { opacity: 1; transform: translateY(0) scale(1); }
+          100% { opacity: 0; transform: translateY(-90px) scale(1.1); }
+        }
+        @keyframes pulse-glow {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.4; }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
 
-const styles = {
-  page: { height: "100vh", display: "flex", flexDirection: "column", background: "#0d0f11", fontFamily: "'DM Sans', sans-serif", color: "#e8eaed", overflow: "hidden" },
-  topbar: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "#161a1e", flexShrink: 0, gap: 12 },
-  brand: { display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 15 },
-  brandDot: { width: 8, height: 8, borderRadius: "50%", background: "#3b82f6", boxShadow: "0 0 8px rgba(59,130,246,0.6)", animation: "pulse 2s infinite" },
-  roomInfo: { display: "flex", alignItems: "center", gap: 10, background: "#1e2329", border: "1px solid rgba(255,255,255,0.07)", padding: "5px 14px", borderRadius: 99, fontSize: 13 },
-  liveDot: { width: 6, height: 6, borderRadius: "50%", background: "#22c55e" },
-  roomCode: { fontFamily: "monospace", fontSize: 12, color: "#5a6270", letterSpacing: 1 },
-  topRight: { display: "flex", alignItems: "center", gap: 10 },
-  timer: { fontFamily: "monospace", fontSize: 13, color: "#5a6270" },
-  iconBtn: { width: 34, height: 34, borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.07)", color: "#7c8490", cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" },
-  main: { flex: 1, display: "flex", overflow: "hidden" },
-  videoArea: { flex: 1, display: "flex", flexDirection: "column", padding: 16, gap: 12, position: "relative", overflow: "hidden" },
-  whiteboardOverlay: { position: "absolute", inset: 0, zIndex: 50 },
-  videoGrid: { flex: 1, display: "grid", gap: 10, overflow: "hidden" },
-  reactionsContainer: { position: "absolute", bottom: 100, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8, pointerEvents: "none", zIndex: 10 },
-  reactionFloat: { display: "flex", flexDirection: "column", alignItems: "center", animation: "floatUp 2.5s ease-out forwards", background: "rgba(0,0,0,0.7)", borderRadius: 99, padding: "6px 10px", gap: 2, backdropFilter: "blur(4px)" },
-  reactionEmoji: { fontSize: 24 },
-  reactionName: { fontSize: 10, color: "#a0a6b0" },
-  sidebar: { width: 300, borderLeft: "1px solid rgba(255,255,255,0.07)", background: "#161a1e", display: "flex", flexDirection: "column", flexShrink: 0 },
-  tabs: { display: "flex", borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "0 4px" },
-  tab: { flex: 1, padding: "12px 4px", textAlign: "center", fontSize: 12, fontWeight: 500, color: "#7c8490", cursor: "pointer", border: "none", background: "transparent", borderBottom: "2px solid transparent", marginBottom: -1, transition: "all 0.15s", fontFamily: "inherit" },
-  tabActive: { color: "#3b82f6", borderBottomColor: "#3b82f6" },
-  errorPage: { height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0d0f11", fontFamily: "'DM Sans', sans-serif" },
-  errorCard: { background: "#161a1e", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 40, display: "flex", flexDirection: "column", alignItems: "center", gap: 12, maxWidth: 400 },
-  retryBtn: { background: "#3b82f6", border: "none", color: "#fff", padding: "10px 24px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 600 },
+// ── Convork icon (inline so Room is self-contained) ───────────────────────────
+function ConvorkMark({ size = 26 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+      <rect width="32" height="32" rx="8" fill="url(#rmg)" />
+      <rect x="5" y="10" width="14" height="12" rx="3" fill="white" opacity="0.9" />
+      <polygon points="19,13 27,9 27,23 19,19" fill="white" opacity="0.7" />
+      <circle cx="12" cy="16" r="3" fill="url(#rmg2)" />
+      <defs>
+        <linearGradient id="rmg" x1="0" y1="0" x2="32" y2="32">
+          <stop offset="0%" stopColor="#6c63ff" />
+          <stop offset="100%" stopColor="#a78bfa" />
+        </linearGradient>
+        <linearGradient id="rmg2" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#10d9a0" />
+          <stop offset="100%" stopColor="#06b6d4" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────#060810
+const s = {
+  // Layout
+  page: { height: "100vh", display: "flex", flexDirection: "column", background: "#060810", fontFamily: "'DM Sans', sans-serif", color: "#eef0f6", overflow: "hidden", position: "relative" },
+
+  // Background
+  roomBg: { position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" },
+  bgGlow1: { position: "absolute", top: "-10%", left: "15%", width: "50vw", height: "40vh", borderRadius: "50%", background: "radial-gradient(ellipse, rgba(108,99,255,0.06) 0%, transparent 70%)" },
+  bgGlow2: { position: "absolute", bottom: "-5%", right: "20%", width: "40vw", height: "30vh", borderRadius: "50%", background: "radial-gradient(ellipse, rgba(16,217,160,0.04) 0%, transparent 70%)" },
+  bgGrid: { position: "absolute", inset: 0, backgroundImage: "linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px)", backgroundSize: "64px 64px" },
+  cornerGeo: { position: "absolute", top: 0, right: 0, width: 400, height: 300, opacity: 1 },
+  cornerGeo2: { position: "absolute", bottom: 0, left: 0, width: 400, height: 300, opacity: 1 },
+
+  // Top bar
+  topbar: { position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 18px", height: 54, borderBottom: "1px solid rgba(255,255,255,0.05)", background: "rgba(6,8,16,0.92)", backdropFilter: "blur(20px)", flexShrink: 0 },
+  topLeft: { display: "flex", alignItems: "center", gap: 10, flex: 1 },
+  brandMark: { display: "flex", alignItems: "center", flexShrink: 0 },
+  brandName: { fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 13, letterSpacing: "0.05em", color: "#eef0f6" },
+  topDivider: { width: 1, height: 16, background: "rgba(255,255,255,0.07)", margin: "0 4px" },
+  roomChip: { display: "flex", alignItems: "center", gap: 7, background: "rgba(252, 242, 242, 0.04)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(255,255,255,0.06)", borderRadius: 8, padding: "4px 12px" },
+  liveRing: { width: 6, height: 6, borderRadius: "50%", background: "#10d9a0", boxShadow: "0 0 8px rgba(16,217,160,0.8)", animation: "pulse-glow 2s ease-in-out infinite" },
+  roomChipName: { fontSize: 12, fontWeight: 600, color: "#a0a6b8" },
+
+  topCenter: { display: "flex", justifyContent: "center", flex: 1 },
+  timerPill: { display: "flex", alignItems: "center", gap: 7, background: "rgba(255,255,255,0.03)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(255,255,255,0.05)", borderRadius: 8, padding: "5px 14px" },
+  timerRecDot: { width: 5, height: 5, borderRadius: "50%", background: "#ff4d6d", animation: "pulse-glow 1.5s ease-in-out infinite" },
+  timerVal: { fontFamily: "'DM Mono', monospace", fontSize: 12, color: "#626880", letterSpacing: "0.08em" },
+
+  topRight: { display: "flex", alignItems: "center", gap: 8, flex: 1, justifyContent: "flex-end" },
+  peerCount: { display: "flex", alignItems: "center", gap: 5, background: "rgba(108,99,255,0.1)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(108,99,255,0.2)", borderRadius: 8, padding: "4px 12px", fontSize: 12, fontWeight: 700, color: "#a78bfa" },
+  peerDot: { width: 5, height: 5, borderRadius: "50%", background: "#a78bfa" },
+  codeBtn: { display: "flex", alignItems: "center", gap: 7, background: "rgba(255,255,255,0.04)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(255,255,255,0.07)", borderRadius: 8, padding: "4px 12px", cursor: "pointer", color: "#626880", transition: "all 0.2s" },
+  codeBtnDone: { borderColor: "rgba(16,217,160,0.4)", color: "#10d9a0", background: "rgba(16,217,160,0.06)" },
+  codeMono: { fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.1em" },
+  codeIcon: { fontSize: 12 },
+  sharingBadge: { display: "flex", alignItems: "center", gap: 6, background: "rgba(16,217,160,0.1)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(16,217,160,0.3)", borderRadius: 8, padding: "4px 12px", fontSize: 11, fontWeight: 700, color: "#10d9a0" },
+  sharingDot: { width: 5, height: 5, borderRadius: "50%", background: "#10d9a0", animation: "pulse-glow 1s infinite" },
+
+  // Main layout
+  main: { flex: 1, display: "flex", overflow: "hidden", position: "relative", zIndex: 1 },
+
+  // Video area
+  videoArea: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    padding: "12px 14px 14px 14px", // Balanced padding on all sides
+    overflow: "hidden",
+    position: "relative"
+  },
+  controlsWrapper: {
+    position: "absolute",
+    bottom: 24,         // Floats it nicely above the bottom video edge
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 30,         // Keeps it layered safely above the streaming video tiles
+    pointerEvents: "auto"
+  }, 
+  wbOverlay: { position: "absolute", inset: 0, zIndex: 50, borderRadius: 12, overflow: "hidden", margin: "0 10px 0 0" },
+  videoGrid: { flex: 1, display: "grid", gap: 8, overflow: "hidden" },
+
+  // Reactions
+  reactionsWrap: { position: "absolute", bottom: 100, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 12, pointerEvents: "none", zIndex: 20 },
+  reactionItem: { display: "flex", flexDirection: "column", alignItems: "center", gap: 5, animation: "float-reaction 2.8s ease-out forwards" },
+  reactionBubble: { background: "rgba(10,13,22,0.88)", backdropFilter: "blur(12px)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(255,255,255,0.1)", borderRadius: 14, padding: "8px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" },
+  reactionEmoji: { fontSize: 26 },
+  reactionName: { fontSize: 10, color: "#626880", fontWeight: 600 },
+
+  // Sidebar
+  sidebar: { width: 288, borderLeft: "1px solid rgba(255,255,255,0.05)", background: "rgba(6,8,16,0.95)", backdropFilter: "blur(20px)", display: "flex", flexDirection: "column", flexShrink: 0 },
+  sidebarTabs: { display: "flex", borderBottom: "1px solid rgba(255,255,255,0.05)", padding: "8px 6px 0", gap: 2 },
+  sidebarTab: { flex: 1, padding: "9px 4px 10px", background: "transparent", border: "none", borderBottom: "2px solid transparent", color: "#626880", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, transition: "all 0.2s", fontFamily: "inherit", borderRadius: "8px 8px 0 0", position: "relative", letterSpacing: "0.02em" },
+  sidebarTabActive: { color: "#a78bfa", borderBottomColor: "#6c63ff", background: "rgba(108,99,255,0.06)" },
+  tabIcon: { fontSize: 16 },
+  tabCountBadge: { position: "absolute", top: 6, right: 4, background: "rgba(108,99,255,0.25)", color: "#a78bfa", fontSize: 9, fontWeight: 800, borderRadius: 99, padding: "1px 5px", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(108,99,255,0.2)" },
+  tabUnreadBadge: { position: "absolute", top: 5, right: 3, background: "#ff4d6d", color: "#fff", fontSize: 9, fontWeight: 800, borderRadius: 99, padding: "1px 5px", minWidth: 16, textAlign: "center" },
+  sidebarPanel: { flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" },
+
+  // Error
+  errorPage: { height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#060810", fontFamily: "'DM Sans', sans-serif", position: "relative", overflow: "hidden" },
+  errorBg1: { position: "absolute", top: "20%", left: "20%", width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%)", pointerEvents: "none" },
+  errorBg2: { position: "absolute", bottom: "20%", right: "20%", width: 300, height: 300, borderRadius: "50%", background: "radial-gradient(circle, rgba(255,77,109,0.07) 0%, transparent 70%)", pointerEvents: "none" },
+  errorCard: { position: "relative", zIndex: 1, background: "rgba(10,13,22,0.9)", backdropFilter: "blur(24px)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(255,255,255,0.07)", borderRadius: 20, padding: "44px 40px", display: "flex", flexDirection: "column", alignItems: "center", gap: 12, maxWidth: 380, textAlign: "center", boxShadow: "0 32px 80px rgba(0,0,0,0.6)" },
+  errorIcon: { fontSize: 40, marginBottom: 4 },
+  errorTitle: { fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 20, color: "#eef0f6" },
+  errorDesc: { fontSize: 14, color: "#626880", lineHeight: 1.6 },
+  retryBtn: { background: "linear-gradient(135deg, #6c63ff, #a78bfa)", border: "none", color: "#fff", padding: "11px 28px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 700, boxShadow: "0 4px 16px rgba(108,99,255,0.4)", marginTop: 4 },
 };

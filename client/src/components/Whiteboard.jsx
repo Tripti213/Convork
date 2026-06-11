@@ -1,58 +1,62 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
-// Fabric.js is loaded via CDN script tag in index.html:
-// <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+const COLORS = [
+  { hex: "#ffffff", label: "White" },
+  { hex: "#6c63ff", label: "Purple" },
+  { hex: "#10d9a0", label: "Teal" },
+  { hex: "#ff4d6d", label: "Red" },
+  { hex: "#f59e0b", label: "Amber" },
+  { hex: "#3b82f6", label: "Blue" },
+  { hex: "#ec4899", label: "Pink" },
+  { hex: "#000000", label: "Black" },
+];
 
-const COLORS = ["#ffffff", "#3b82f6", "#22c55e", "#ef4444", "#f59e0b", "#a855f7", "#ec4899", "#000000"];
-const BRUSH_SIZES = [2, 4, 8, 14];
+const BRUSHES = [
+  { size: 2, label: "Fine" },
+  { size: 5, label: "Medium" },
+  { size: 10, label: "Thick" },
+  { size: 18, label: "Bold" },
+];
 
 export default function Whiteboard({ socket, roomId, onClose }) {
   const canvasRef = useRef(null);
   const fabricRef = useRef(null);
-  const isRemoteEvent = useRef(false);
+  const isRemote = useRef(false);
 
-  const [tool, setTool] = useState("pen"); // pen | eraser | select
-  const [color, setColor] = useState("#ffffff");
-  const [brushSize, setBrushSize] = useState(4);
+  const [tool, setTool]       = useState("pen");
+  const [color, setColor]     = useState("#ffffff");
+  const [brushSize, setBrush] = useState(5);
+  const [objectCount, setObjectCount] = useState(0);
 
-  // ─── Init Fabric canvas ────────────────────────────────────────────────────
+  // Init Fabric
   useEffect(() => {
     const fabric = window.fabric;
     if (!fabric || !canvasRef.current) return;
 
+    const parent = canvasRef.current.parentElement;
     const canvas = new fabric.Canvas(canvasRef.current, {
       isDrawingMode: true,
-      backgroundColor: "#1e2329",
-      width: canvasRef.current.parentElement.clientWidth,
-      height: canvasRef.current.parentElement.clientHeight - 52, // subtract toolbar
+      backgroundColor: "#0c0f18",
+      width: parent.clientWidth,
+      height: parent.clientHeight,
     });
 
     canvas.freeDrawingBrush.color = color;
     canvas.freeDrawingBrush.width = brushSize;
     fabricRef.current = canvas;
 
-    // Broadcast path:created to peers
     canvas.on("path:created", ({ path }) => {
-      if (isRemoteEvent.current) return;
-      const pathData = path.toJSON();
+      if (isRemote.current) return;
+      setObjectCount(canvas.getObjects().length);
       socket.current?.emit("whiteboard-event", {
         roomId,
-        event: { type: "path:created", data: pathData },
+        event: { type: "path:created", data: path.toJSON() },
       });
     });
 
-    canvas.on("object:modified", ({ target }) => {
-      if (isRemoteEvent.current) return;
-      socket.current?.emit("whiteboard-event", {
-        roomId,
-        event: { type: "object:modified", data: target.toJSON(["id"]) },
-      });
-    });
-
-    // Handle resize
     const onResize = () => {
-      canvas.setWidth(canvasRef.current?.parentElement?.clientWidth || 800);
-      canvas.setHeight((canvasRef.current?.parentElement?.clientHeight || 600) - 52);
+      canvas.setWidth(parent.clientWidth);
+      canvas.setHeight(parent.clientHeight);
       canvas.renderAll();
     };
     window.addEventListener("resize", onResize);
@@ -63,48 +67,48 @@ export default function Whiteboard({ socket, roomId, onClose }) {
     };
   }, []);
 
-  // ─── Receive remote whiteboard events ─────────────────────────────────────
+  // Remote events
   useEffect(() => {
     if (!socket.current) return;
     const sock = socket.current;
 
-    const handleRemoteEvent = ({ event }) => {
+    const handle = ({ event }) => {
       const canvas = fabricRef.current;
-      if (!canvas) return;
       const fabric = window.fabric;
-
-      isRemoteEvent.current = true;
+      if (!canvas) return;
+      isRemote.current = true;
 
       if (event.type === "path:created") {
         fabric.Path.fromObject(event.data, (path) => {
           canvas.add(path);
           canvas.renderAll();
-          isRemoteEvent.current = false;
+          setObjectCount(canvas.getObjects().length);
+          isRemote.current = false;
         });
       } else if (event.type === "clear") {
         canvas.clear();
-        canvas.backgroundColor = "#1e2329";
+        canvas.backgroundColor = "#0c0f18";
         canvas.renderAll();
-        isRemoteEvent.current = false;
+        setObjectCount(0);
+        isRemote.current = false;
       } else {
-        isRemoteEvent.current = false;
+        isRemote.current = false;
       }
     };
 
-    sock.on("whiteboard-event", handleRemoteEvent);
-    return () => sock.off("whiteboard-event", handleRemoteEvent);
+    sock.on("whiteboard-event", handle);
+    return () => sock.off("whiteboard-event", handle);
   }, [socket]);
 
-  // ─── Tool changes ──────────────────────────────────────────────────────────
+  // Tool changes
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-
     if (tool === "select") {
       canvas.isDrawingMode = false;
     } else if (tool === "eraser") {
       canvas.isDrawingMode = true;
-      canvas.freeDrawingBrush.color = "#1e2329";
+      canvas.freeDrawingBrush.color = "#0c0f18";
       canvas.freeDrawingBrush.width = brushSize * 3;
     } else {
       canvas.isDrawingMode = true;
@@ -113,166 +117,132 @@ export default function Whiteboard({ socket, roomId, onClose }) {
     }
   }, [tool, color, brushSize]);
 
-  const clearCanvas = useCallback(() => {
+  const clear = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
     canvas.clear();
-    canvas.backgroundColor = "#1e2329";
+    canvas.backgroundColor = "#0c0f18";
     canvas.renderAll();
-    socket.current?.emit("whiteboard-event", {
-      roomId,
-      event: { type: "clear" },
-    });
+    setObjectCount(0);
+    socket.current?.emit("whiteboard-event", { roomId, event: { type: "clear" } });
   }, [socket, roomId]);
 
-  const undoLast = useCallback(() => {
+  const undo = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const objects = canvas.getObjects();
-    if (objects.length > 0) canvas.remove(objects[objects.length - 1]);
+    const objs = canvas.getObjects();
+    if (objs.length > 0) {
+      canvas.remove(objs[objs.length - 1]);
+      setObjectCount(canvas.getObjects().length);
+    }
   }, []);
 
   return (
-    <div style={styles.container}>
+    <div style={s.container}>
       {/* Toolbar */}
-      <div style={styles.toolbar}>
+      <div style={s.toolbar}>
         {/* Tools */}
-        <div style={styles.toolGroup}>
+        <div style={s.toolGroup}>
           {[
-            { id: "pen", icon: "✏️", label: "Draw" },
-            { id: "eraser", icon: "◻", label: "Erase" },
-            { id: "select", icon: "↖", label: "Select" },
-          ].map(({ id, icon, label }) => (
-            <button
-              key={id}
-              style={{ ...styles.toolBtn, ...(tool === id ? styles.toolActive : {}) }}
-              onClick={() => setTool(id)}
-              title={label}
-            >
-              {icon}
-            </button>
+            { id: "pen",    icon: "✏️", label: "Draw" },
+            { id: "eraser", icon: "◻",  label: "Erase" },
+            { id: "select", icon: "↖",  label: "Select" },
+          ].map(t => (
+            <ToolBtn key={t.id} icon={t.icon} label={t.label}
+              active={tool === t.id} onClick={() => setTool(t.id)} />
           ))}
         </div>
 
-        <div style={styles.separator} />
+        <div style={s.sep} />
 
         {/* Colors */}
-        <div style={styles.toolGroup}>
-          {COLORS.map((c) => (
-            <button
-              key={c}
-              onClick={() => { setColor(c); setTool("pen"); }}
+        <div style={s.colorRow}>
+          {COLORS.map(c => (
+            <button key={c.hex} title={c.label}
               style={{
-                ...styles.colorBtn,
-                background: c,
-                boxShadow: color === c && tool === "pen" ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : "none",
+                ...s.colorBtn,
+                background: c.hex,
+                transform: color === c.hex && tool === "pen" ? "scale(1.25)" : "scale(1)",
+                boxShadow: color === c.hex && tool === "pen" ? `0 0 0 2px rgba(255,255,255,0.2), 0 0 8px ${c.hex}66` : "none",
               }}
-              title={c}
+              onClick={() => { setColor(c.hex); setTool("pen"); }}
             />
           ))}
         </div>
 
-        <div style={styles.separator} />
+        <div style={s.sep} />
 
         {/* Brush sizes */}
-        <div style={styles.toolGroup}>
-          {BRUSH_SIZES.map((size) => (
-            <button
-              key={size}
-              onClick={() => setBrushSize(size)}
-              style={{ ...styles.sizeBtn, ...(brushSize === size ? styles.toolActive : {}) }}
-              title={`${size}px`}
+        <div style={s.toolGroup}>
+          {BRUSHES.map(b => (
+            <button key={b.size}
+              style={{ ...s.sizeBtn, ...(brushSize === b.size ? s.sizeBtnActive : {}) }}
+              onClick={() => setBrushSize(b.size)}
+              title={b.label}
             >
-              <div style={{ width: size + 4, height: size + 4, borderRadius: "50%", background: color, maxWidth: 18, maxHeight: 18 }} />
+              <div style={{ width: Math.min(b.size + 2, 16), height: Math.min(b.size + 2, 16), borderRadius: "50%", background: tool === "pen" ? color : "rgba(255,255,255,0.3)" }} />
             </button>
           ))}
         </div>
 
-        <div style={styles.separator} />
+        <div style={s.sep} />
 
         {/* Actions */}
-        <div style={styles.toolGroup}>
-          <button style={styles.toolBtn} onClick={undoLast} title="Undo last stroke">↩</button>
-          <button style={styles.toolBtn} onClick={clearCanvas} title="Clear board">🗑</button>
+        <div style={s.toolGroup}>
+          <ToolBtn icon="↩" label="Undo" onClick={undo} disabled={objectCount === 0} />
+          <ToolBtn icon="🗑" label="Clear" onClick={clear} disabled={objectCount === 0} />
         </div>
 
         <div style={{ flex: 1 }} />
 
-        <button style={styles.closeBtn} onClick={onClose}>✕ Close</button>
+        {/* Object count */}
+        {objectCount > 0 && (
+          <div style={s.countChip}>{objectCount} stroke{objectCount !== 1 ? "s" : ""}</div>
+        )}
+
+        {/* Close */}
+        <button style={s.closeBtn} onClick={onClose}>
+          <span>✕</span>
+          <span>Close board</span>
+        </button>
       </div>
 
       {/* Canvas */}
-      <div style={styles.canvasWrap}>
+      <div style={s.canvasWrap}>
         <canvas ref={canvasRef} />
       </div>
     </div>
   );
 }
 
-const styles = {
-  container: {
-    position: "absolute",
-    inset: 0,
-    background: "#1e2329",
-    zIndex: 50,
-    display: "flex",
-    flexDirection: "column",
-    borderRadius: 12,
-    overflow: "hidden",
-    border: "1px solid rgba(255,255,255,0.1)",
-  },
-  toolbar: {
-    display: "flex",
-    alignItems: "center",
-    gap: 4,
-    padding: "8px 12px",
-    background: "#161a1e",
-    borderBottom: "1px solid rgba(255,255,255,0.07)",
-    flexWrap: "wrap",
-    height: 52,
-    flexShrink: 0,
-  },
-  toolGroup: { display: "flex", alignItems: "center", gap: 3 },
-  separator: { width: 1, height: 24, background: "rgba(255,255,255,0.07)", margin: "0 4px" },
-  toolBtn: {
-    width: 30, height: 30,
-    border: "1px solid rgba(255,255,255,0.07)",
-    borderRadius: 6,
-    background: "transparent",
-    color: "#a0a6b0",
-    cursor: "pointer",
-    fontSize: 14,
-    display: "flex", alignItems: "center", justifyContent: "center",
-  },
-  toolActive: {
-    background: "rgba(59,130,246,0.2)",
-    borderColor: "rgba(59,130,246,0.5)",
-    color: "#3b82f6",
-  },
-  colorBtn: {
-    width: 20, height: 20,
-    borderRadius: "50%",
-    border: "none",
-    cursor: "pointer",
-    transition: "box-shadow 0.15s",
-  },
-  sizeBtn: {
-    width: 30, height: 30,
-    border: "1px solid rgba(255,255,255,0.07)",
-    borderRadius: 6,
-    background: "transparent",
-    cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center",
-  },
-  closeBtn: {
-    background: "rgba(239,68,68,0.1)",
-    border: "1px solid rgba(239,68,68,0.3)",
-    color: "#ef4444",
-    borderRadius: 6,
-    padding: "5px 12px",
-    fontSize: 12,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  },
+function ToolBtn({ icon, label, active, onClick, disabled }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      style={{ ...s.toolBtn, ...(active ? s.toolBtnActive : {}), ...(hov && !disabled ? s.toolBtnHov : {}), ...(disabled ? s.toolBtnDisabled : {}) }}
+      onClick={onClick} disabled={disabled}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      title={label}
+    >
+      {icon}
+    </button>
+  );
+}
+
+const s = {
+  container: { position: "absolute", inset: 0, display: "flex", flexDirection: "column", background: "#0c0f18", borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" },
+  toolbar: { display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", background: "rgba(6,8,16,0.9)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0, flexWrap: "wrap", minHeight: 52 },
+  toolGroup: { display: "flex", alignItems: "center", gap: 2 },
+  sep: { width: 1, height: 24, background: "rgba(255,255,255,0.06)", margin: "0 4px" },
+  toolBtn: { width: 30, height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "transparent", color: "#626880", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s", fontFamily: "inherit" },
+  toolBtnHov: { background: "rgba(255,255,255,0.06)", color: "#a0a6b8" },
+  toolBtnActive: { background: "rgba(108,99,255,0.2)", borderColor: "rgba(108,99,255,0.4)", color: "#a78bfa" },
+  toolBtnDisabled: { opacity: 0.3, cursor: "not-allowed" },
+  colorRow: { display: "flex", alignItems: "center", gap: 5 },
+  colorBtn: { width: 18, height: 18, borderRadius: "50%", border: "none", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 },
+  sizeBtn: { width: 30, height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" },
+  sizeBtnActive: { background: "rgba(108,99,255,0.15)", borderColor: "rgba(108,99,255,0.35)" },
+  countChip: { fontSize: 11, color: "#3d4258", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 6, padding: "3px 9px", fontFamily: "'DM Mono', monospace" },
+  closeBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "rgba(255,77,109,0.1)", border: "1px solid rgba(255,77,109,0.2)", borderRadius: 8, color: "#ff6b8a", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" },
   canvasWrap: { flex: 1, overflow: "hidden" },
 };

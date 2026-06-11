@@ -1,13 +1,18 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Room from "./pages/Room";
 
-// Protected route wrapper
+// Protected route — redirect to login if not authenticated
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
-  if (loading) return <div style={loadingStyle}>Connecting…</div>;
+  if (loading) return (
+    <div style={loadingStyle}>
+      <div style={spinnerStyle} />
+    </div>
+  );
   if (!user) return <Navigate to="/login" replace />;
   return children;
 };
@@ -17,16 +22,11 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/dashboard"
-            element={<Protected><Dashboard /></Protected>}
-          />
-          <Route
-            path="/room/:roomId"
-            element={<Protected><Room /></Protected>}
-          />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/"          element={<Home />} />
+          <Route path="/login"     element={<Login />} />
+          <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
+          <Route path="/room/:roomId" element={<Protected><Room /></Protected>} />
+          <Route path="*"          element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
@@ -38,8 +38,14 @@ const loadingStyle = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  background: "#0d0f11",
-  color: "#7c8490",
-  fontFamily: "'DM Sans', sans-serif",
-  fontSize: 14,
+  background: "#060810",
+};
+
+const spinnerStyle = {
+  width: 28,
+  height: 28,
+  borderRadius: "50%",
+  border: "2px solid rgba(108,99,255,0.2)",
+  borderTopColor: "#6c63ff",
+  animation: "spin 0.7s linear infinite",
 };
