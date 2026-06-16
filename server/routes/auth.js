@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const { pool } = require("../config/db");
 const { authenticateToken } = require("../middleware/auth");
+const { generateTurnCredentials } = require("../utils/turnCredentials");
 
 const router = express.Router();
 
@@ -153,6 +154,34 @@ router.post("/rooms/join", authenticateToken, async (req, res) => {
     console.error("Join room error:", err);
     res.status(500).json({ error: "Server error" });
   }
+});
+
+router.get("/ice-servers", authenticateToken, (req, res) => {
+  const iceServers = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+
+  // Preferred: dynamic time-limited credentials (requires TURN_SECRET in .env)
+  const dynamic = generateTurnCredentials(req.user.id);
+  if (dynamic && process.env.TURN_URL) {
+    iceServers.push({
+      urls: process.env.TURN_URL,
+      username: dynamic.username,
+      credential: dynamic.credential,
+    });
+  }
+  // Fallback: static credentials from .env
+  else if (process.env.TURN_URL && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
+    iceServers.push({
+      urls: process.env.TURN_URL,
+      username: process.env.TURN_USERNAME,
+      credential: process.env.TURN_CREDENTIAL,
+    });
+  }
+  // If neither is configured, client falls back to STUN-only (logged client-side)
+
+  res.json({ iceServers });
 });
 
 module.exports = router;

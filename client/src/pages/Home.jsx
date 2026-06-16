@@ -468,7 +468,7 @@ const s = {
     position: "absolute", 
     inset: 0, 
     // Changed to pure white for a crisp, solid background behind the text
-    background: "#ffffff", 
+    background: "#f8fafc", 
     // Blur helps the faded edges transition smoothly over the mock UI
     backdropFilter: "blur(16px)",
     // "black" keeps the white overlay solid on the right (100% 50%).

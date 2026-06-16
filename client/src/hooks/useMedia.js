@@ -1,17 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 export const useMedia = () => {
-  const [localStream, setLocalStream] = useState(null);
-  const [screenStream, setScreenStream] = useState(null);
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [localStream,     setLocalStream]     = useState(null);
+  const [screenStream,    setScreenStream]    = useState(null);
+  const [audioEnabled,    setAudioEnabled]    = useState(true);
+  const [videoEnabled,    setVideoEnabled]    = useState(true);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
-  const [mediaError, setMediaError] = useState(null);
+  const [mediaError,      setMediaError]      = useState(null);
 
-  const localVideoRef = useRef(null);
-  const cameraStreamRef = useRef(null); // always holds the original camera stream
+  // Refs hold the live values — never go stale inside callbacks
+  const cameraStreamRef    = useRef(null);
+  const screenStreamRef    = useRef(null);
+  const localVideoRef      = useRef(null);
+  const origCamTrackRef    = useRef(null); // original camera video track
 
-  // ─── Get user camera + mic ─────────────────────────────────────────────────
+  // ── Start camera + mic ────────────────────────────────────────────────────
   const startMedia = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -19,7 +22,9 @@ export const useMedia = () => {
         audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 },
       });
 
-      cameraStreamRef.current = stream; // save original camera stream
+      origCamTrackRef.current  = stream.getVideoTracks()[0];
+      cameraStreamRef.current  = stream;
+
       setLocalStream(stream);
 
       if (localVideoRef.current) {
@@ -31,43 +36,33 @@ export const useMedia = () => {
       return stream;
     } catch (err) {
       const msg =
-        err.name === "NotAllowedError"
-          ? "Camera/microphone permission denied. Please allow access and reload."
-          : err.name === "NotFoundError"
-          ? "No camera or microphone found."
-          : `Media error: ${err.message}`;
+        err.name === "NotAllowedError" ? "Camera/microphone permission denied. Please allow access and reload."
+        : err.name === "NotFoundError" ? "No camera or microphone found."
+        : `Media error: ${err.message}`;
       setMediaError(msg);
       return null;
     }
   }, []);
 
-  // ─── Toggle microphone ─────────────────────────────────────────────────────
+  // ── Toggle mic ────────────────────────────────────────────────────────────
   const toggleAudio = useCallback(() => {
-    const stream = cameraStreamRef.current;
-    if (!stream) return true;
-    const track = stream.getAudioTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      setAudioEnabled(track.enabled);
-      return track.enabled;
-    }
-    return true;
+    const track = cameraStreamRef.current?.getAudioTracks()[0];
+    if (!track) return true;
+    track.enabled = !track.enabled;
+    setAudioEnabled(track.enabled);
+    return track.enabled;
   }, []);
 
-  // ─── Toggle camera ─────────────────────────────────────────────────────────
+  // ── Toggle camera ─────────────────────────────────────────────────────────
   const toggleVideo = useCallback(() => {
-    const stream = cameraStreamRef.current;
-    if (!stream) return true;
-    const track = stream.getVideoTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      setVideoEnabled(track.enabled);
-      return track.enabled;
-    }
-    return true;
+    const track = cameraStreamRef.current?.getVideoTracks()[0];
+    if (!track) return true;
+    track.enabled = !track.enabled;
+    setVideoEnabled(track.enabled);
+    return track.enabled;
   }, []);
 
-  // ─── Start screen share ────────────────────────────────────────────────────
+  // ── Start screen share ────────────────────────────────────────────────────
   const startScreenShare = useCallback(async () => {
     try {
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
@@ -75,75 +70,99 @@ export const useMedia = () => {
         audio: true,
       });
 
+      screenStreamRef.current = displayStream;
       setScreenStream(displayStream);
       setIsSharingScreen(true);
 
-      // Handle browser's native "Stop sharing" button
+      // When user clicks browser's native "Stop sharing" button
       displayStream.getVideoTracks()[0].onended = () => {
-        restoreCamera(displayStream);
+        stopScreenShareInternal();
       };
 
       return displayStream;
     } catch (err) {
-      if (err.name !== "NotAllowedError") {
-        setMediaError(`Screen share error: ${err.message}`);
-      }
+      if (err.name !== "NotAllowedError") setMediaError(`Screen share error: ${err.message}`);
       return null;
     }
   }, []);
 
-  // ─── Restore camera after screen share stops ───────────────────────────────
-  const restoreCamera = useCallback((displayStream) => {
-    // Stop screen tracks
-    displayStream?.getTracks().forEach((t) => t.stop());
+  // what React state says.
+  const stopScreenShareInternal = useCallback(() => {
+    const sStream = screenStreamRef.current;
+    if (sStream) {
+      sStream.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+    }
     setScreenStream(null);
     setIsSharingScreen(false);
 
-    const cameraStream = cameraStreamRef.current;
-    if (!cameraStream) return null;
+    const origTrack = origCamTrackRef.current;
+    if (!origTrack) return null;
 
-    const cameraTrack = cameraStream.getVideoTracks()[0];
-    if (!cameraTrack) return null;
-
-    // Make sure track is alive — if it died, restart media entirely
-    if (cameraTrack.readyState === "ended") {
+    if (origTrack.readyState === "ended") {
+      console.warn("[Media] Original cam track ended, restarting media");
       startMedia();
       return null;
     }
 
-    cameraTrack.enabled = true;
+    origTrack.enabled = true;
 
-    // Force React to re-render VideoTile by setting a NEW stream object
-    // that contains the same tracks — this is the key fix
-    const freshStream = new MediaStream([
-      cameraTrack,
-      ...cameraStream.getAudioTracks(),
-    ]);
+    const camStream   = cameraStreamRef.current;
+    const audioTracks = camStream ? camStream.getAudioTracks() : [];
+    const freshStream = new MediaStream([origTrack, ...audioTracks]);
 
     cameraStreamRef.current = freshStream;
-    setLocalStream(freshStream); // new object reference = React re-renders
+    setLocalStream(freshStream);
 
-    // Re-attach to local video element
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = freshStream;
       localVideoRef.current.play().catch(() => {});
     }
 
-    return cameraTrack;
+    return origTrack;
   }, [startMedia]);
 
-  // ─── Public stopScreenShare (called from Room.jsx) ─────────────────────────
-  const stopScreenShare = useCallback((stream) => {
-    return restoreCamera(stream || screenStream);
-  }, [screenStream, restoreCamera]);
+  // Public stopScreenShare — same as internal, exposed to Room.jsx
+  const stopScreenShare = useCallback(() => {
+    return stopScreenShareInternal();
+  }, [stopScreenShareInternal]);
 
-  // ─── Cleanup ───────────────────────────────────────────────────────────────
+  const stopAllTracks = useCallback(() => {
+    // Stop camera stream (from ref — always current)
+    cameraStreamRef.current?.getTracks().forEach(t => {
+      t.stop();
+      console.log(`[Media] Stopped track: ${t.kind} (${t.label})`);
+    });
+
+    // Stop screen stream (from ref — always current)
+    screenStreamRef.current?.getTracks().forEach(t => t.stop());
+
+    // Release video element — this is what turns off the camera LED
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+
+    // Clear refs
+    cameraStreamRef.current = null;
+    screenStreamRef.current = null;
+    origCamTrackRef.current = null;
+
+    // Clear state
+    setLocalStream(null);
+    setScreenStream(null);
+    setIsSharingScreen(false);
+    setAudioEnabled(true);
+    setVideoEnabled(true);
+  }, []);
+
+  // Safety net: stop tracks if component unmounts without explicit cleanup
   useEffect(() => {
     return () => {
-      cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
-      screenStream?.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current?.getTracks().forEach(t => t.stop());
+      screenStreamRef.current?.getTracks().forEach(t => t.stop());
+      if (localVideoRef.current) localVideoRef.current.srcObject = null;
     };
-  }, [screenStream]);
+  }, []);
 
   return {
     localStream,
@@ -158,5 +177,6 @@ export const useMedia = () => {
     toggleVideo,
     startScreenShare,
     stopScreenShare,
+    stopAllTracks,
   };
 };

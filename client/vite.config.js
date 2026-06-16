@@ -5,15 +5,18 @@ export default defineConfig({
   plugins: [react()],
   define: {
     global: "globalThis",
+    "process.env": {},
   },
   resolve: {
     alias: {
       events: "events",
       util: "util",
+      // Provide a browser-safe process polyfill
+      process: "process/browser",
     },
   },
   optimizeDeps: {
-    include: ["events", "util"],
+    include: ["events", "util", "process/browser"],
     esbuildOptions: {
       define: { global: "globalThis" },
     },

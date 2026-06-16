@@ -30,7 +30,7 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      navigate(`/room/${data.id}?code=${data.code}&name=${encodeURIComponent(data.name)}`);
+      navigate(`/room/${data.id}?code=${data.code}&name=${encodeURIComponent(data.name)}&isHost=true`);
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   };

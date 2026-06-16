@@ -4,42 +4,6 @@ Video conferencing + screen share + whiteboard + file sharing, built with WebRTC
 
 ---
 
-## Project Structure
-
-```
-rtc-app/
-├── client/               # React + Vite frontend
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── VideoTile.jsx         # Single video/avatar tile
-│   │   │   ├── Controls.jsx          # Bottom control bar
-│   │   │   ├── Whiteboard.jsx        # Fabric.js drawing canvas
-│   │   │   ├── ChatPanel.jsx         # Real-time chat sidebar
-│   │   │   ├── FilesPanel.jsx        # File upload/download
-│   │   │   └── ParticipantsPanel.jsx # User list
-│   │   ├── hooks/
-│   │   │   ├── useSocket.js          # Socket.io connection
-│   │   │   ├── useWebRTC.js          # Peer connection management
-│   │   │   └── useMedia.js           # Camera/mic/screen share
-│   │   ├── context/
-│   │   │   └── AuthContext.jsx       # JWT auth state
-│   │   └── pages/
-│   │       ├── Login.jsx             # Login + Register
-│   │       ├── Dashboard.jsx         # Create/join room
-│   │       └── Room.jsx              # Main meeting room
-│
-└── server/               # Node.js + Express backend
-    ├── config/db.js       # PostgreSQL pool + schema
-    ├── middleware/auth.js  # JWT verify middleware
-    ├── routes/
-    │   ├── auth.js        # /register /login /me /rooms
-    │   └── files.js       # /upload /download /room/:id
-    └── socket/
-        └── signaling.js   # WebRTC signaling via Socket.io
-```
-
----
-
 ## Phase 1 — Auth + Rooms Setup
 
 ### 1. Database (PostgreSQL)

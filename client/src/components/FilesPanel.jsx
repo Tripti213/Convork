@@ -31,15 +31,17 @@ function timeAgo(iso) {
 }
 
 export default function FilesPanel({ socket, roomId, token }) {
-  const [files, setFiles] = useState([]);
+  const [files,    setFiles]    = useState([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [error, setError] = useState("");
+  const [error,    setError]    = useState("");
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    fetch(`/api/files/room/${roomId}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`/api/files/room/${roomId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then(r => r.ok ? r.json() : [])
       .then(data => setFiles(data))
       .catch(() => {});
@@ -51,7 +53,7 @@ export default function FilesPanel({ socket, roomId, token }) {
     const handle = (fileData) => setFiles(prev => [fileData, ...prev]);
     sock.on("file-uploaded", handle);
     return () => sock.off("file-uploaded", handle);
-  }, [socket]);
+  }, [socket.current]);
 
   const upload = async (file) => {
     if (!file) return;
@@ -61,40 +63,77 @@ export default function FilesPanel({ socket, roomId, token }) {
     const formData = new FormData();
     formData.append("file", file);
 
-    await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", `/api/files/upload/${roomId}`);
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) setProgress(Math.round(e.loaded / e.total * 100));
-      };
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          const data = JSON.parse(xhr.responseText);
-          setFiles(prev => [data, ...prev]);
-          socket.current?.emit("file-uploaded", { roomId, file: data });
-          resolve();
-        } else reject(new Error("Upload failed"));
-      };
-      xhr.onerror = () => reject(new Error("Network error"));
-      xhr.send(formData);
-    }).catch(err => setError(err.message));
+    try {
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `/api/files/upload/${roomId}`);
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) setProgress(Math.round(e.loaded / e.total * 100));
+        };
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            const data = JSON.parse(xhr.responseText);
+            setFiles(prev => [data, ...prev]);
+            socket.current?.emit("file-uploaded", { roomId, file: data });
+            resolve();
+          } else {
+            reject(new Error("Upload failed"));
+          }
+        };
+        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.send(formData);
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+      setProgress(0);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
-    setUploading(false); setProgress(0);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const downloadFile = async (file) => {
+    try {
+      const res = await fetch(file.downloadUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError(err.error || "Download failed");
+        return;
+      }
+
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href     = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Release the object URL after download starts
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      setError("Download failed: " + err.message);
+    }
   };
 
   return (
     <div style={s.panel}>
       {/* Drop zone */}
       <div
-        style={{ ...s.dropZone, ...(dragOver ? s.dropZoneDrag : {}), ...(uploading ? s.dropZoneUploading : {}) }}
+        style={{ ...s.dropZone, ...(dragOver ? s.dropDrag : {}), ...(uploading ? s.dropUploading : {}) }}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={e => { e.preventDefault(); setDragOver(false); upload(e.dataTransfer.files[0]); }}
         onClick={() => !uploading && fileInputRef.current?.click()}
       >
-        <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={e => upload(e.target.files[0])} />
+        <input ref={fileInputRef} type="file" style={{ display: "none" }}
+          onChange={e => upload(e.target.files[0])} />
 
         {uploading ? (
           <div style={s.uploadingState}>
@@ -102,31 +141,25 @@ export default function FilesPanel({ socket, roomId, token }) {
               <svg viewBox="0 0 36 36" style={{ width: 48, height: 48 }}>
                 <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="2" />
                 <circle cx="18" cy="18" r="15" fill="none" stroke="#6c63ff" strokeWidth="2"
-                  strokeDasharray={`${progress * 0.942} 94.2`}
-                  strokeLinecap="round"
+                  strokeDasharray={`${progress * 0.942} 94.2`} strokeLinecap="round"
                   style={{ transformOrigin: "50% 50%", transform: "rotate(-90deg)", transition: "stroke-dasharray 0.3s" }}
                 />
               </svg>
               <span style={s.progressPct}>{progress}%</span>
             </div>
-            <span style={s.uploadingText}>Uploading…</span>
+            <span style={{ fontSize: 12, color: "#626880" }}>Uploading…</span>
           </div>
         ) : (
           <>
-            <div style={{ ...s.dropIcon, ...(dragOver ? s.dropIconDrag : {}) }}>
-              {dragOver ? "📂" : "↑"}
-            </div>
+            <div style={{ ...s.dropIcon, ...(dragOver ? s.dropIconDrag : {}) }}>↑</div>
             <span style={s.dropTitle}>{dragOver ? "Drop to upload" : "Upload file"}</span>
             <span style={s.dropSub}>Drag & drop or click · Max 50MB</span>
           </>
         )}
       </div>
 
-      {error && (
-        <div style={s.error}>⚠ {error}</div>
-      )}
+      {error && <div style={s.error}>⚠ {error}</div>}
 
-      {/* File list */}
       <div style={s.fileList}>
         {files.length === 0 && !uploading && (
           <div style={s.empty}>
@@ -152,17 +185,21 @@ export default function FilesPanel({ socket, roomId, token }) {
                   <span>{timeAgo(file.uploadedAt)}</span>
                 </div>
               </div>
-              <a href={file.downloadUrl} download={file.name} style={s.dlBtn} onClick={e => e.stopPropagation()} title="Download">
-                <span>↓</span>
-              </a>
+              {/* Use button + fetch instead of <a href> to send auth token */}
+              <button
+                style={s.dlBtn}
+                onClick={() => downloadFile(file)}
+                title="Download"
+              >
+                ↓
+              </button>
             </div>
           );
         })}
       </div>
 
-      {/* Encryption note */}
       <div style={s.footer}>
-        <span style={s.lockIcon}>🔒</span>
+        <span>🔒</span>
         <span>Files encrypted at rest (AES-256)</span>
       </div>
     </div>
@@ -170,30 +207,28 @@ export default function FilesPanel({ socket, roomId, token }) {
 }
 
 const s = {
-  panel: { display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" },
-  dropZone: { margin: "12px", border: "1.5px dashed rgba(255,255,255,0.08)", borderRadius: 14, padding: "18px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, cursor: "pointer", transition: "all 0.2s", background: "rgba(255,255,255,0.01)", flexShrink: 0 },
-  dropZoneDrag: { borderColor: "rgba(108,99,255,0.5)", background: "rgba(108,99,255,0.06)", transform: "scale(0.99)" },
-  dropZoneUploading: { cursor: "default", borderColor: "rgba(108,99,255,0.3)", background: "rgba(108,99,255,0.04)" },
-  dropIcon: { width: 36, height: 36, borderRadius: 10, background: "rgba(108,99,255,0.12)", border: "1px solid rgba(108,99,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#6c63ff", fontWeight: 700, marginBottom: 4, transition: "all 0.2s" },
+  panel:        { display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" },
+  dropZone:     { margin: "12px", borderWidth: "1.5px", borderStyle: "dashed", borderColor: "rgba(255,255,255,0.08)", borderRadius: 14, padding: "18px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, cursor: "pointer", transition: "all 0.2s", background: "rgba(255,255,255,0.01)", flexShrink: 0 },
+  dropDrag:     { borderColor: "rgba(108,99,255,0.5)", background: "rgba(108,99,255,0.06)", transform: "scale(0.99)" },
+  dropUploading:{ cursor: "default", borderColor: "rgba(108,99,255,0.3)", background: "rgba(108,99,255,0.04)" },
+  dropIcon:     { width: 36, height: 36, borderRadius: 10, background: "rgba(108,99,255,0.12)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(108,99,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#6c63ff", fontWeight: 700, marginBottom: 4, transition: "all 0.2s" },
   dropIconDrag: { transform: "scale(1.1)", background: "rgba(108,99,255,0.2)" },
-  dropTitle: { fontSize: 13, fontWeight: 600, color: "#a0a6b8" },
-  dropSub: { fontSize: 11, color: "#3d4258" },
-  uploadingState: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8 },
+  dropTitle:    { fontSize: 13, fontWeight: 600, color: "#a0a6b8" },
+  dropSub:      { fontSize: 11, color: "#3d4258" },
+  uploadingState:{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 },
   progressRing: { position: "relative", display: "flex", alignItems: "center", justifyContent: "center" },
-  progressPct: { position: "absolute", fontSize: 11, fontWeight: 700, color: "#a78bfa", fontFamily: "'DM Mono', monospace" },
-  uploadingText: { fontSize: 12, color: "#626880" },
-  error: { margin: "0 12px 8px", padding: "8px 12px", background: "rgba(255,77,109,0.08)", border: "1px solid rgba(255,77,109,0.2)", borderRadius: 9, color: "#ff8fa3", fontSize: 12 },
-  fileList: { flex: 1, overflowY: "auto", padding: "4px 8px" },
-  empty: { display: "flex", flexDirection: "column", alignItems: "center", padding: "32px 0" },
-  emptyText: { fontSize: 13, color: "#2a2f42" },
-  fileItem: { display: "flex", alignItems: "center", gap: 10, padding: "9px 8px", borderRadius: 10, transition: "background 0.15s", cursor: "default", animation: "slide-in-up 0.25s both" },
+  progressPct:  { position: "absolute", fontSize: 11, fontWeight: 700, color: "#a78bfa", fontFamily: "'DM Mono', monospace" },
+  error:        { margin: "0 12px 8px", padding: "8px 12px", background: "rgba(255,77,109,0.08)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(255,77,109,0.2)", borderRadius: 9, color: "#ff8fa3", fontSize: 12 },
+  fileList:     { flex: 1, overflowY: "auto", padding: "4px 8px" },
+  empty:        { display: "flex", flexDirection: "column", alignItems: "center", padding: "32px 0" },
+  emptyText:    { fontSize: 13, color: "#2a2f42" },
+  fileItem:     { display: "flex", alignItems: "center", gap: 10, padding: "9px 8px", borderRadius: 10, transition: "background 0.15s", animation: "slide-in-up 0.25s both" },
   fileIconWrap: { width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  fileIcon: { fontSize: 17 },
-  fileMeta: { flex: 1, minWidth: 0 },
-  fileName: { fontSize: 13, fontWeight: 600, color: "#c8ccd8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 2 },
-  fileInfo: { display: "flex", gap: 4, fontSize: 11, color: "#3d4258" },
-  dot: { color: "#2a2f42" },
-  dlBtn: { width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "#626880", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", fontSize: 14, flexShrink: 0, transition: "all 0.15s" },
-  footer: { display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 12px 12px", fontSize: 10, color: "#2a2f42", letterSpacing: "0.04em" },
-  lockIcon: { fontSize: 11 },
+  fileIcon:     { fontSize: 17 },
+  fileMeta:     { flex: 1, minWidth: 0 },
+  fileName:     { fontSize: 13, fontWeight: 600, color: "#c8ccd8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 2 },
+  fileInfo:     { display: "flex", gap: 4, fontSize: 11, color: "#3d4258" },
+  dot:          { color: "#2a2f42" },
+  dlBtn:        { width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.04)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(255,255,255,0.07)", color: "#626880", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0, transition: "all 0.15s", cursor: "pointer", fontFamily: "inherit" },
+  footer:       { display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 12px 12px", fontSize: 10, color: "#2a2f42" },
 };

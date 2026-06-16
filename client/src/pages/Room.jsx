@@ -7,7 +7,7 @@ import { useWebRTC } from "../hooks/useWebRTC";
 
 import VideoTile from "../components/VideoTile";
 import Controls from "../components/Controls";
-import ChatPanel from "../components/ChatPanel";
+import ChatPanel, { registerChatListener, clearCache } from "../components/ChatPanel";
 import FilesPanel from "../components/FilesPanel";
 import ParticipantsPanel from "../components/ParticipantsPanel";
 import Whiteboard from "../components/Whiteboard";
@@ -26,10 +26,10 @@ export default function Room() {
     localStream, screenStream, localVideoRef,
     audioEnabled, videoEnabled, isSharingScreen,
     mediaError, startMedia, toggleAudio, toggleVideo,
-    startScreenShare, stopScreenShare,
+    startScreenShare, stopScreenShare, stopAllTracks,
   } = useMedia();
 
-  const { peers, replaceTrack, destroyAll } = useWebRTC({ socket, roomId, localStream });
+  const { peers, replaceTrack, destroyAll } = useWebRTC({ socket, roomId, localStream, token });
 
   const [sidebarTab, setSidebarTab] = useState("people");
   const [isWhiteboardOpen, setWhiteboard] = useState(false);
@@ -39,6 +39,11 @@ export default function Room() {
   const [mediaReady, setMediaReady] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [unreadChat, setUnreadChat] = useState(0);
+  const [isWaiting, setIsWaiting] = useState(false);
+  const [wasDenied, setWasDenied] = useState(false);
+  const [isHostUser, setIsHostUser] = useState(false);
+  const [wasRemoved, setWasRemoved] = useState(false);
+  const [whiteboardOpenedBy, setWhiteboardOpenedBy] = useState(null);
 
   // ── Boot ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -47,7 +52,11 @@ export default function Room() {
 
   useEffect(() => {
     if (mediaReady && socket.current) {
-      emit("join-room", { roomId, avatarColor: user?.avatarColor });
+      emit("join-room", {
+        roomId,
+        avatarColor: user?.avatarColor,
+        isCreator: searchParams.get("isHost") === "true",
+      });
     }
   }, [mediaReady, socket.current]);
 
@@ -69,45 +78,95 @@ export default function Room() {
 
   // ── Unread chat badge ────────────────────────────────────────────────────────
   useEffect(() => {
-    const unsub = on("chat-message", () => {
+    const sock = socket.current;
+    if (!sock) return;
+    const handleMsg = () => {
       if (sidebarTab !== "chat") setUnreadChat(n => n + 1);
-    });
-    return unsub;
-  }, [on, sidebarTab]);
+    };
+    sock.on("chat-message", handleMsg);
+    return () => sock.off("chat-message", handleMsg);
+  }, [socket.current, sidebarTab]);
 
   useEffect(() => {
     if (sidebarTab === "chat") setUnreadChat(0);
   }, [sidebarTab]);
 
   useEffect(() => {
-  const handlePopState = () => {
-    destroyAll();
-    localStream?.getTracks().forEach(t => t.stop());
-    disconnect();
-  };
-  window.addEventListener("popstate", handlePopState);
-  return () => window.removeEventListener("popstate", handlePopState);
-}, [localStream]);
+    const handlePopState = () => {
+      destroyAll();
+      localStream?.getTracks().forEach(t => t.stop());
+      disconnect();
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [localStream]);
+
+  useEffect(() => {
+    const unsubWaiting = on("waiting-for-admission", () => setIsWaiting(true));
+    const unsubAdmitted = on("admitted", ({ isHost }) => {
+      setIsWaiting(false);
+      setIsHostUser(isHost);
+    });
+    const unsubDenied = on("admission-denied", () => setWasDenied(true));
+    const unsubRemoved = on("removed-from-room", () => setWasRemoved(true));
+
+    return () => {
+      unsubWaiting();
+      unsubAdmitted();
+      unsubDenied();
+      unsubRemoved();
+    };
+  }, [on]);
+
+  useEffect(() => {
+    if (!socket.current || !roomId) return;
+    const unregister = registerChatListener(socket, roomId);
+    return () => unregister();
+  }, [socket.current, roomId]);
+
+  useEffect(() => {
+    const sock = socket.current;
+    if (!sock) return;
+    const handleWbOpen = ({ name }) => { setWhiteboardOpenedBy(name); setWhiteboard(true); };
+    const handleWbClose = () => { setWhiteboardOpenedBy(null); setWhiteboard(false); };
+    sock.on("whiteboard-opened", handleWbOpen);
+    sock.on("whiteboard-closed", handleWbClose);
+    return () => {
+      sock.off("whiteboard-opened", handleWbOpen);
+      sock.off("whiteboard-closed", handleWbClose);
+    };
+  }, [socket.current]);
 
   // ── Screen share ─────────────────────────────────────────────────────────────
   const handleToggleScreen = useCallback(async () => {
-    if (isSharingScreen) {
-      const originalTrack = stopScreenShare(screenStream);
-      if (originalTrack) {
-        const screenTrack = screenStream?.getVideoTracks()[0];
-        if (screenTrack) replaceTrack(screenTrack, originalTrack);
-      }
-      emit("screen-share-stopped", { roomId });
-    } else {
-      const displayStream = await startScreenShare();
-      if (displayStream) {
-        const screenTrack = displayStream.getVideoTracks()[0];
-        const localVidTrack = localStream?.getVideoTracks()[0];
-        if (localVidTrack) replaceTrack(localVidTrack, screenTrack);
-        emit("screen-share-started", { roomId });
-      }
+  if (isSharingScreen) {
+    const screenVideoTrack = screenStream?.getVideoTracks()[0];
+    const restoredTrack = stopScreenShare();
+
+    if (screenVideoTrack && restoredTrack) {
+      replaceTrack(screenVideoTrack, restoredTrack);
     }
-  }, [isSharingScreen, screenStream, localStream, roomId]);
+
+    emit("screen-share-stopped", { roomId });
+
+    // Restore the real camera on/off state now that screen share ended
+    emit("media-state", { roomId, audio: audioEnabled, video: videoEnabled });
+
+  } else {
+    const displayStream = await startScreenShare();
+    if (displayStream) {
+      const screenTrack   = displayStream.getVideoTracks()[0];
+      const localVidTrack = localStream?.getVideoTracks()[0];
+      if (localVidTrack) replaceTrack(localVidTrack, screenTrack);
+
+      emit("screen-share-started", { roomId });
+
+      // Tell peers video is now "on" — screen share counts as visible
+      // video content regardless of whether the camera itself is off
+      emit("media-state", { roomId, audio: audioEnabled, video: true });
+    }
+  }
+}, [isSharingScreen, screenStream, localStream, roomId, audioEnabled, videoEnabled]);
 
   const handleToggleAudio = () => {
     const e = toggleAudio();
@@ -121,8 +180,9 @@ export default function Room() {
 
   const handleLeave = () => {
     destroyAll();
-    localStream?.getTracks().forEach(t => t.stop());
+    stopAllTracks();
     disconnect();
+    clearCache(roomId);
     navigate("/dashboard", { replace: true });
   };
 
@@ -161,6 +221,53 @@ export default function Room() {
       </div>
     </div>
   );
+
+  if (isWaiting) {
+    return (
+      <div style={s.errorPage}>
+        <div style={s.errorBg1} />
+        <div style={s.errorCard}>
+          <div style={{ ...s.errorIcon, animation: "pulse-glow 2s infinite" }}>⏳</div>
+          <h2 style={s.errorTitle}>Waiting for host</h2>
+          <p style={s.errorDesc}>
+            The host has been notified. You'll join automatically once admitted.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (wasDenied) {
+    return (
+      <div style={s.errorPage}>
+        <div style={s.errorBg2} />
+        <div style={s.errorCard}>
+          <div style={s.errorIcon}>🚫</div>
+          <h2 style={s.errorTitle}>Access denied</h2>
+          <p style={s.errorDesc}>The host didn't admit you to this meeting.</p>
+          <button style={s.retryBtn} onClick={() => navigate("/dashboard", { replace: true })}>
+            Back to dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (wasRemoved) {
+    return (
+      <div style={s.errorPage}>
+        <div style={s.errorBg2} />
+        <div style={s.errorCard}>
+          <div style={s.errorIcon}>👋</div>
+          <h2 style={s.errorTitle}>Removed from meeting</h2>
+          <p style={s.errorDesc}>The host removed you from this call.</p>
+          <button style={s.retryBtn} onClick={() => navigate("/dashboard", { replace: true })}>
+            Back to dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={s.page}>
@@ -271,6 +378,8 @@ export default function Room() {
                 stream={peer.stream}
                 name={peer.name}
                 avatarColor={peer.avatarColor}
+                isMuted={peer.audioEnabled === false}
+                isCamOff={peer.videoEnabled === false}
                 isPinned={pinnedSocketId === peer.socketId}
                 onPin={() => setPinned(pinnedSocketId === peer.socketId ? null : peer.socketId)}
               />
@@ -304,7 +413,11 @@ export default function Room() {
             onToggleAudio={handleToggleAudio}
             onToggleVideo={handleToggleVideo}
             onToggleScreen={handleToggleScreen}
-            onToggleWhiteboard={() => setWhiteboard(v => !v)}
+            onToggleWhiteboard={() => {
+              const next = !isWhiteboardOpen;
+              setWhiteboard(next);
+              socket.current?.emit(next ? "whiteboard-opened" : "whiteboard-closed", { roomId, name: user?.name });
+            }}
             onReaction={handleReaction}
             onLeave={handleLeave}
           />
@@ -344,7 +457,7 @@ export default function Room() {
                 localUser={user}
                 socket={socket}
                 roomId={roomId}
-                isHost
+                isHost={isHostUser}
               />
             )}
             {sidebarTab === "chat" && (
@@ -461,7 +574,7 @@ const s = {
     transform: "translateX(-50%)",
     zIndex: 30,         // Keeps it layered safely above the streaming video tiles
     pointerEvents: "auto"
-  }, 
+  },
   wbOverlay: { position: "absolute", inset: 0, zIndex: 50, borderRadius: 12, overflow: "hidden", margin: "0 10px 0 0" },
   videoGrid: { flex: 1, display: "grid", gap: 8, overflow: "hidden" },
 
