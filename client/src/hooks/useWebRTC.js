@@ -38,13 +38,16 @@ export const useWebRTC = ({ socket, roomId, localStream, token }) => {
   }, [token]);
 
   const syncPeers = () => {
-    setPeers([...peersRef.current.entries()].map(([socketId, data]) => ({
+    const list = [...peersRef.current.entries()].map(([socketId, data]) => ({
       socketId, stream: data.stream, name: data.name, avatarColor: data.avatarColor,
       audioEnabled: data.audioEnabled, videoEnabled: data.videoEnabled,
-    })));
+    }));
+    console.log(`[DEBUG syncPeers] peers count: ${list.length}, streams:`, list.map(p => p.stream?.id?.slice(0,8)));
+    setPeers(list);
   };
 
   const createPeer = useCallback((targetSocketId, initiator, userData) => {
+    console.log(`[DEBUG createPeer] Creating peer for ${targetSocketId}, initiator=${initiator}`);
     const peer = new SimplePeer({
       initiator,
       trickle: true,
@@ -59,6 +62,7 @@ export const useWebRTC = ({ socket, roomId, localStream, token }) => {
     });
 
     peer.on("stream", (remoteStream) => {
+      console.log(`[DEBUG peer.on('stream')] FIRED for ${targetSocketId}. Stream id: ${remoteStream.id.slice(0,8)}, video tracks:`, remoteStream.getVideoTracks().map(t => `${t.id.slice(0,8)}(${t.readyState})`));
       peersRef.current.set(targetSocketId, { ...peersRef.current.get(targetSocketId), stream: remoteStream });
       syncPeers();
     });
@@ -72,14 +76,18 @@ export const useWebRTC = ({ socket, roomId, localStream, token }) => {
       if (entry) {
         entry.videoSender = videoSender || null;
         entry.audioSender = audioSender || null;
+        console.log(`[DEBUG peer.on('connect')] ${targetSocketId} videoSender cached:`, !!videoSender);
       }
     });
 
     peer.on("error", (err) => {
-      console.error(`Peer error with ${targetSocketId}:`, err.message);
+      console.error(`[DEBUG peer error] ${targetSocketId}:`, err.message);
       removePeer(targetSocketId);
     });
-    peer.on("close", () => removePeer(targetSocketId));
+    peer.on("close", () => {
+      console.warn(`[DEBUG peer close] ${targetSocketId}`);
+      removePeer(targetSocketId);
+    });
 
     peersRef.current.set(targetSocketId, {
       peer, stream: null, name: userData?.name || "Unknown",
@@ -89,7 +97,7 @@ export const useWebRTC = ({ socket, roomId, localStream, token }) => {
 
     syncPeers();
     return peer;
-  }, [socket]); // <-- localStream REMOVED from deps. This is the fix.
+  }, [socket]);
 
   const removePeer = useCallback((socketId) => {
     const entry = peersRef.current.get(socketId);
@@ -115,6 +123,7 @@ export const useWebRTC = ({ socket, roomId, localStream, token }) => {
     const handleIceCandidate = ({ fromSocketId, candidate }) => peersRef.current.get(fromSocketId)?.peer.signal(candidate);
     const handleUserLeft = ({ socketId }) => removePeer(socketId);
     const handleMediaState = ({ socketId, audio, video }) => {
+      console.log(`[DEBUG media-state received] socketId=${socketId}, audio=${audio}, video=${video}`);
       const entry = peersRef.current.get(socketId);
       if (entry) { entry.audioEnabled = audio; entry.videoEnabled = video; syncPeers(); }
     };
@@ -136,17 +145,10 @@ export const useWebRTC = ({ socket, roomId, localStream, token }) => {
       sock.off("user-left", handleUserLeft);
       sock.off("user-media-state", handleMediaState);
     };
-
   }, [socket, roomId, createPeer, removePeer]);
 
-  const hasCreatedInitialPeers = useRef(false);
-  useEffect(() => {
-    if (!localStream || hasCreatedInitialPeers.current) return;
-    hasCreatedInitialPeers.current = true;
-    // localStreamRef is already up to date by the time this runs
-  }, [localStream]);
-
   const replaceTrack = useCallback((oldTrack, newTrack) => {
+    console.log(`[DEBUG replaceTrack] old=${oldTrack?.id?.slice(0,8)}(${oldTrack?.readyState}) new=${newTrack?.id?.slice(0,8)}(${newTrack?.readyState})`);
     peersRef.current.forEach((entry, socketId) => {
       const { peer, videoSender } = entry;
       let sender = videoSender;
@@ -155,14 +157,18 @@ export const useWebRTC = ({ socket, roomId, localStream, token }) => {
         const pc = peer._pc;
         sender = pc?.getSenders().find(s => s.track?.kind === (newTrack?.kind || "video"));
         if (sender) entry.videoSender = sender;
+        console.log(`[DEBUG replaceTrack] ${socketId} fallback lookup, found:`, !!sender);
       }
 
       if (sender) {
+        console.log(`[DEBUG replaceTrack] ${socketId} BEFORE: sender.track=${sender.track?.id?.slice(0,8)}(${sender.track?.readyState})`);
         sender.replaceTrack(newTrack)
-          .then(() => console.log(`[WebRTC] replaceTrack succeeded for ${socketId}`))
-          .catch(err => console.error(`[WebRTC] replaceTrack failed for ${socketId}:`, err.message));
+          .then(() => {
+            console.log(`[DEBUG replaceTrack] ${socketId} SUCCESS. sender.track NOW=${sender.track?.id?.slice(0,8)}(${sender.track?.readyState})`);
+          })
+          .catch(err => console.error(`[DEBUG replaceTrack] ${socketId} FAILED:`, err.message));
       } else {
-        console.warn(`[WebRTC] No video sender found for peer ${socketId}`);
+        console.warn(`[DEBUG replaceTrack] ${socketId} NO SENDER AVAILABLE`);
       }
     });
   }, []);

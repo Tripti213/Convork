@@ -27,6 +27,7 @@ export default function Room() {
     audioEnabled, videoEnabled, isSharingScreen,
     mediaError, startMedia, toggleAudio, toggleVideo,
     startScreenShare, stopScreenShare, stopAllTracks,
+    setOnNativeStop,
   } = useMedia();
 
   const { peers, replaceTrack, destroyAll } = useWebRTC({ socket, roomId, localStream, token });
@@ -44,9 +45,12 @@ export default function Room() {
   const [isHostUser, setIsHostUser] = useState(false);
   const [wasRemoved, setWasRemoved] = useState(false);
   const [whiteboardOpenedBy, setWhiteboardOpenedBy] = useState(null);
+  const hasStartedMedia = useRef(false);
 
   // ── Boot ────────────────────────────────────────────────────────────────────
   useEffect(() => {
+    if (hasStartedMedia.current) return;
+    hasStartedMedia.current = true;
     startMedia().then(s => s && setMediaReady(true));
   }, []);
 
@@ -137,36 +141,53 @@ export default function Room() {
     };
   }, [socket.current]);
 
+  useEffect(() => {
+    setOnNativeStop(() => {
+      const screenVideoTrack = screenStream?.getVideoTracks()[0];
+      const restoredTrack = stopScreenShare();
+      if (screenVideoTrack && restoredTrack) {
+        replaceTrack(screenVideoTrack, restoredTrack);
+      }
+      emit("screen-share-stopped", { roomId });
+      emit("media-state", { roomId, audio: audioEnabled, video: videoEnabled });
+    });
+  }, [screenStream, audioEnabled, videoEnabled, roomId]);
+
   // ── Screen share ─────────────────────────────────────────────────────────────
   const handleToggleScreen = useCallback(async () => {
-  if (isSharingScreen) {
-    const screenVideoTrack = screenStream?.getVideoTracks()[0];
-    const restoredTrack = stopScreenShare();
+    console.log("[CLICK]", Date.now(), "isSharingScreen RIGHT NOW:", isSharingScreen, "button should say:", isSharingScreen ? "Stop" : "Share");
+    console.log("[DEBUG] handleToggleScreen called. isSharingScreen:", isSharingScreen);
+    console.log("[DEBUG] screenStream at this moment:", screenStream);
+    console.log("[DEBUG] screenStream video tracks:", screenStream?.getVideoTracks());
 
-    if (screenVideoTrack && restoredTrack) {
-      replaceTrack(screenVideoTrack, restoredTrack);
+    if (isSharingScreen) {
+      const screenVideoTrack = screenStream?.getVideoTracks()[0];
+      console.log("[DEBUG] screenVideoTrack captured:", screenVideoTrack);
+
+      const restoredTrack = stopScreenShare();
+      console.log("[DEBUG] restoredTrack returned:", restoredTrack);
+
+      if (screenVideoTrack && restoredTrack) {
+        console.log("[DEBUG] Calling replaceTrack NOW");
+        replaceTrack(screenVideoTrack, restoredTrack);
+      } else {
+        console.error("[DEBUG] SKIPPED replaceTrack! screenVideoTrack:", screenVideoTrack, "restoredTrack:", restoredTrack);
+      }
+
+      emit("screen-share-stopped", { roomId });
+      emit("media-state", { roomId, audio: audioEnabled, video: videoEnabled });
+
+    } else {
+      const displayStream = await startScreenShare();
+      if (displayStream) {
+        const screenTrack = displayStream.getVideoTracks()[0];
+        const localVidTrack = localStream?.getVideoTracks()[0];
+        if (localVidTrack) replaceTrack(localVidTrack, screenTrack);
+        emit("screen-share-started", { roomId });
+        emit("media-state", { roomId, audio: audioEnabled, video: true });
+      }
     }
-
-    emit("screen-share-stopped", { roomId });
-
-    // Restore the real camera on/off state now that screen share ended
-    emit("media-state", { roomId, audio: audioEnabled, video: videoEnabled });
-
-  } else {
-    const displayStream = await startScreenShare();
-    if (displayStream) {
-      const screenTrack   = displayStream.getVideoTracks()[0];
-      const localVidTrack = localStream?.getVideoTracks()[0];
-      if (localVidTrack) replaceTrack(localVidTrack, screenTrack);
-
-      emit("screen-share-started", { roomId });
-
-      // Tell peers video is now "on" — screen share counts as visible
-      // video content regardless of whether the camera itself is off
-      emit("media-state", { roomId, audio: audioEnabled, video: true });
-    }
-  }
-}, [isSharingScreen, screenStream, localStream, roomId, audioEnabled, videoEnabled]);
+  }, [isSharingScreen, screenStream, localStream, roomId, audioEnabled, videoEnabled]);
 
   const handleToggleAudio = () => {
     const e = toggleAudio();
