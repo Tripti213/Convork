@@ -4,6 +4,7 @@ import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Room from "./pages/Room";
+import MyNotes from "./pages/MyNotes";
 
 // Protected route — redirect to login if not authenticated
 const Protected = ({ children }) => {
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
           <Route path="/room/:roomId" element={<Protected><Room /></Protected>} />
           <Route path="*"          element={<Navigate to="/" replace />} />
+          <Route path="/notes" element={<Protected><MyNotes /></Protected>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

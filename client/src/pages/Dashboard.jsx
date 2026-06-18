@@ -74,6 +74,9 @@ export default function Dashboard() {
           <span style={s.navName}>Convork</span>
         </div>
         <div style={s.navRight}>
+          <button style={s.navCta} onClick={() => navigate("/notes")}>
+            My Notes
+          </button>
           <div style={s.greeting}>
             Good {getGreeting()}, <strong style={{ color: "#0f172a" }}>{user?.name?.split(" ")[0]}</strong>
           </div>
@@ -232,6 +235,7 @@ const s = {
   navBrand: { display: "flex", alignItems: "center", gap: 10, cursor: "pointer" },
   navName: { fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 16, letterSpacing: "-0.3px", color: "#0f172a" },
   navRight: { display: "flex", alignItems: "center", gap: 20 },
+  navCta: { background: "linear-gradient(135deg, #6c63ff, #a78bfa)", border: "none", borderRadius: 9, padding: "8px 20px", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 4px 16px rgba(108,99,255,0.25)", transition: "all 0.2s" },
   greeting: { fontSize: 13, color: "#64748b" },
   userChip: { display: "flex", alignItems: "center", gap: 8, padding: "5px 12px 5px 6px", background: "rgba(15,23,42,0.04)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(15,23,42,0.08)", borderRadius: 99, cursor: "pointer", position: "relative" },
   userAvatar: { width: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" },

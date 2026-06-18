@@ -11,6 +11,7 @@ const fileRoutes = require("./routes/files");
 const { initSignaling } = require("./socket/signaling");
 const { authenticateToken } = require("./middleware/auth");
 const { startCleanupScheduler } = require("./jobs/cleanup");
+const notesRoutes = require("./routes/notes");
 
 const app = express();
 const server = http.createServer(app);
@@ -71,6 +72,7 @@ app.use("/uploads", express.static("uploads"));
 // ─── Routes ──────────────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/files", authenticateToken, fileRoutes);
+app.use("/api/notes", authenticateToken, notesRoutes);
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 

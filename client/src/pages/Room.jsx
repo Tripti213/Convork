@@ -11,6 +11,7 @@ import ChatPanel, { registerChatListener, clearCache } from "../components/ChatP
 import FilesPanel from "../components/FilesPanel";
 import ParticipantsPanel from "../components/ParticipantsPanel";
 import Whiteboard from "../components/Whiteboard";
+import NotesPanel from "../components/NotesPanel";
 
 export default function Room() {
   const { roomId } = useParams();
@@ -155,11 +156,6 @@ export default function Room() {
 
   // ── Screen share ─────────────────────────────────────────────────────────────
   const handleToggleScreen = useCallback(async () => {
-    console.log("[CLICK]", Date.now(), "isSharingScreen RIGHT NOW:", isSharingScreen, "button should say:", isSharingScreen ? "Stop" : "Share");
-    console.log("[DEBUG] handleToggleScreen called. isSharingScreen:", isSharingScreen);
-    console.log("[DEBUG] screenStream at this moment:", screenStream);
-    console.log("[DEBUG] screenStream video tracks:", screenStream?.getVideoTracks());
-
     if (isSharingScreen) {
       const screenVideoTrack = screenStream?.getVideoTracks()[0];
       console.log("[DEBUG] screenVideoTrack captured:", screenVideoTrack);
@@ -452,6 +448,7 @@ export default function Room() {
               { id: "people", icon: "👥", label: "People", count: peers.length + 1 },
               { id: "chat", icon: "💬", label: "Chat", badge: unreadChat },
               { id: "files", icon: "📁", label: "Files" },
+              { id: "notes", icon: "📝", label: "Notes" },
             ].map(({ id, icon, label, count, badge }) => (
               <button
                 key={id}
@@ -486,6 +483,9 @@ export default function Room() {
             )}
             {sidebarTab === "files" && (
               <FilesPanel socket={socket} roomId={roomId} token={token} />
+            )}
+            {sidebarTab === "notes" && (
+              <NotesPanel roomId={roomId} token={token} />
             )}
           </div>
         </aside>
