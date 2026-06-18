@@ -2,8 +2,12 @@ const express = require("express");
 const { pool } = require("../config/db");
 
 const router = express.Router();
+const MAX_CONTENT_LENGTH = 1_500_000;
 
-// ─── Get notes for a specific room (current user's own notes only) ──────────
+function sanitize(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, "");
+}
+
 router.get("/room/:roomId", async (req, res) => {
   try {
     const result = await pool.query(
@@ -24,15 +28,18 @@ router.get("/room/:roomId", async (req, res) => {
   }
 });
 
-// ─── Save/update notes for a room (upsert — autosave-friendly) ──────────────
 router.put("/room/:roomId", async (req, res) => {
   const { content } = req.body;
   if (typeof content !== "string") {
     return res.status(400).json({ error: "Content must be a string" });
   }
-  if (content.length > 50000) {
-    return res.status(400).json({ error: "Notes too long (max 50,000 characters)" });
+  if (content.length > MAX_CONTENT_LENGTH) {
+    return res.status(400).json({
+      error: "Note too large (max ~1.5MB including screenshots). Try removing an image.",
+    });
   }
+
+  const clean = sanitize(content);
 
   try {
     const result = await pool.query(
@@ -41,7 +48,7 @@ router.put("/room/:roomId", async (req, res) => {
        ON CONFLICT (user_id, room_id)
        DO UPDATE SET content = $3, updated_at = NOW()
        RETURNING updated_at`,
-      [req.user.id, req.params.roomId, content]
+      [req.user.id, req.params.roomId, clean]
     );
     res.json({ saved: true, updatedAt: result.rows[0].updated_at });
   } catch (err) {
@@ -50,7 +57,6 @@ router.put("/room/:roomId", async (req, res) => {
   }
 });
 
-// ─── Get all notes for the current user, across all rooms (history view) ────
 router.get("/all", async (req, res) => {
   try {
     const result = await pool.query(
@@ -77,7 +83,6 @@ router.get("/all", async (req, res) => {
   }
 });
 
-// ─── Delete a note ────────────────────────────────────────────────────────────
 router.delete("/:noteId", async (req, res) => {
   try {
     const result = await pool.query(
