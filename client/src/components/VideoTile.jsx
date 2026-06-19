@@ -23,12 +23,6 @@ export default function VideoTile({
   const [hasVideo, setHasVideo] = useState(false);
   const [hovered, setHovered] = useState(false);
 
-  // ── SINGLE effect, SINGLE responsibility: attach stream, watch its track ──
-  // Simple and robust: attach srcObject once per stream. Then use a single
-  // lightweight poll (only while this stream is active) purely to detect
-  // when the video track ID inside this SAME stream object changes — which
-  // happens when replaceTrack() swaps tracks without changing the stream
-  // reference. No second effect, no dependency-array races.
   useEffect(() => {
     const videoEl = videoRef.current;
     if (!videoEl || !stream) {
@@ -48,10 +42,6 @@ export default function VideoTile({
     };
     updateHasVideo();
 
-    // Poll for track swaps within this same stream (covers replaceTrack
-    // cases where srcObject doesn't auto-refresh on some browsers).
-    // This interval is cleaned up whenever `stream` changes or unmounts —
-    // since it's declared inside THIS effect, there's no stale-closure risk.
     const pollId = setInterval(() => {
       const track = stream.getVideoTracks()[0];
       const trackId = track?.id || null;

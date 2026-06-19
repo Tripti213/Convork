@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import SimplePeer from "simple-peer";
+import { apiUrl } from "../config/api";
 
 let cachedIceServers = null;
 let cacheExpiry = 0;
@@ -12,7 +13,7 @@ async function fetchIceServers(token) {
     { urls: "stun:stun1.l.google.com:19302" },
   ];
   try {
-    const res = await fetch("/api/auth/ice-servers", { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(apiUrl("/api/auth/ice-servers"), { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) return FALLBACK;
     const data = await res.json();
     cachedIceServers = data.iceServers || FALLBACK;

@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef } from "react";
+import { apiUrl } from "../config/api";
 
 const AuthContext = createContext(null);
 
@@ -42,7 +43,7 @@ export const AuthProvider = ({ children }) => {
 
       // Then verify with server in background to get fresh user data (avatarColor etc)
       try {
-        const res = await fetch("/api/auth/me", {
+        const res = await fetch(apiUrl("/api/auth/me"), {
           headers: { Authorization: `Bearer ${stored}` },
         });
         if (res.ok) {
@@ -66,7 +67,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (email, password) => {
-    const res = await fetch("/api/auth/login", {
+    const res = await fetch(apiUrl("/api/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
@@ -81,7 +82,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async (name, email, password) => {
-    const res = await fetch("/api/auth/register", {
+    const res = await fetch(apiUrl("/api/auth/register"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, password }),

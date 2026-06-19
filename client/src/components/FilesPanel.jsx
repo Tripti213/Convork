@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { apiUrl } from "../config/api";
 
 const FILE_TYPES = {
   "application/pdf":  { icon: "📄", color: "#ff4d6d", bg: "rgba(255,77,109,0.1)" },
@@ -39,7 +40,7 @@ export default function FilesPanel({ socket, roomId, token }) {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    fetch(`/api/files/room/${roomId}`, {
+    fetch(apiUrl(`/api/files/room/${roomId}`), {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.ok ? r.json() : [])
@@ -66,7 +67,7 @@ export default function FilesPanel({ socket, roomId, token }) {
     try {
       await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", `/api/files/upload/${roomId}`);
+        xhr.open("POST", apiUrl(`/api/files/upload/${roomId}`));
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) setProgress(Math.round(e.loaded / e.total * 100));
@@ -95,7 +96,7 @@ export default function FilesPanel({ socket, roomId, token }) {
 
   const downloadFile = async (file) => {
     try {
-      const res = await fetch(file.downloadUrl, {
+      const res = await fetch(apiUrl(file.downloadUrl), {
         headers: { Authorization: `Bearer ${token}` },
       });
 

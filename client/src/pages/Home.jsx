@@ -442,8 +442,6 @@ const s = {
   // Layered Masked Hero System
   hero: { position: "relative", zIndex: 1, display: "flex", alignItems: "center", minHeight: "calc(100vh - 68px)", overflow: "hidden", padding: "0 48px" },
   
-  // The Mock UI emerges directly from the left edge (left: 0)
-  // Allows the container to span the entire height and width of the hero section
   heroVisual: { 
     position: "absolute", 
     inset: 0, 
@@ -451,28 +449,20 @@ const s = {
     pointerEvents: "none" 
   },
   
-  // Stretches the image to 100% height while maintaining aspect ratio
   heroImage: {
     width: "60%",
     height: "100%",
     objectFit: "cover", 
-    objectPosition: "left center", // Keeps the most important part of the image on the left
-    border: "none",                // Removed the border for a seamless background look
-    borderRadius: 0                // Removed rounded corners to touch the edges perfectly
+    objectPosition: "left center", 
+    border: "none",                
+    borderRadius: 0              
   },
-  // The overlay mask: Circle center moved to 0% (left edge)
-  // The overlay mask
-  // The overlay mask: A frosted circular shape emerging from the right edge
-  // The overlay mask: A solid white circular shape emerging from the right edge
+
   heroOverlay: { 
     position: "absolute", 
     inset: 0, 
-    // Changed to pure white for a crisp, solid background behind the text
     background: "#f8fafc", 
-    // Blur helps the faded edges transition smoothly over the mock UI
     backdropFilter: "blur(16px)",
-    // "black" keeps the white overlay solid on the right (100% 50%).
-    // "transparent" hides the white as it moves left, revealing the Mock UI.
     WebkitMaskImage: "radial-gradient(circle 980px at 100% 50%, black 85%, transparent 25%)",
     maskImage: "radial-gradient(circle 980px at 100% 50%, black 85%, transparent 25%)",
     zIndex: 1, 

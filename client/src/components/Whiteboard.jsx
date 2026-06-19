@@ -22,7 +22,6 @@ export default function Whiteboard({ socket, roomId, onClose }) {
   const canvasRef   = useRef(null);
   const fabricRef   = useRef(null);
   const isRemoteRef = useRef(false);
-  // Bug Fix 1: queue events that arrive before canvas is ready
   const pendingRef  = useRef([]);
 
   const [tool,        setTool]        = useState("pen");

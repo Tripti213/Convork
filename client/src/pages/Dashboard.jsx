@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { apiUrl } from "../config/api";
 
 export default function Dashboard() {
   const { user, token, logout } = useAuth();
@@ -23,7 +24,7 @@ export default function Dashboard() {
     if (!roomName.trim()) return setError("Enter a meeting name");
     setError(""); setLoading(true);
     try {
-      const res = await fetch("/api/auth/rooms", {
+      const res = await fetch(apiUrl("/api/auth/rooms"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name: roomName, password: roomPassword || undefined }),
@@ -39,7 +40,7 @@ export default function Dashboard() {
     if (!joinCode.trim()) return setError("Enter a room code");
     setError(""); setLoading(true);
     try {
-      const res = await fetch("/api/auth/rooms/join", {
+      const res = await fetch(apiUrl("/api/auth/rooms/join"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ code: joinCode, password: joinPassword || undefined }),
