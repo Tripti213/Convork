@@ -35,7 +35,7 @@ export default function MyNotes() {
   }
 
   useEffect(() => {
-    fetch(`${apiUrl}/notes/all`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl("/api/notes/all"), { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => { setNotes(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -44,7 +44,7 @@ export default function MyNotes() {
   const deleteNote = async (noteId) => {
     if (!confirm("Delete this note? This can't be undone.")) return;
     try {
-      await fetch(`${apiUrl}/notes/${noteId}`, {
+      await fetch(apiUrl(`/api/notes/${noteId}`), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -18,7 +18,7 @@ export default function NotesPanel({ roomId, token }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${apiUrl}/notes/room/${roomId}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl(`/api/notes/room/${roomId}`), { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => {
         if (cancelled) return;
@@ -39,7 +39,7 @@ export default function NotesPanel({ roomId, token }) {
     if (html === lastSavedRef.current) return;
     setSaveState("saving");
     try {
-      const res = await fetch(`${apiUrl}/notes/room/${roomId}`, {
+      const res = await fetch(apiUrl(`/api/notes/room/${roomId}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ content: html }),
@@ -71,7 +71,7 @@ export default function NotesPanel({ roomId, token }) {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       const html = liveContentRef.current;
       if (html !== lastSavedRef.current) {
-        fetch(`${apiUrl}/notes/room/${roomId}`, {
+        fetch(apiUrl(`/api/notes/room/${roomId}`), {
           method: "PUT",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ content: html }),
