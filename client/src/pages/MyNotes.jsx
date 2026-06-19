@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { apiUrl } from "../config/api";
 
 // Generates a consistent accent color based on the room name
 function getCardTheme(str) {
@@ -34,7 +35,7 @@ export default function MyNotes() {
   }
 
   useEffect(() => {
-    fetch("/api/notes/all", { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${apiUrl}/notes/all`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => { setNotes(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -43,7 +44,7 @@ export default function MyNotes() {
   const deleteNote = async (noteId) => {
     if (!confirm("Delete this note? This can't be undone.")) return;
     try {
-      await fetch(`/api/notes/${noteId}`, {
+      await fetch(`${apiUrl}/notes/${noteId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
