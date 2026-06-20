@@ -18,9 +18,14 @@ export default function NotesPanel({ roomId, token }) {
 
   useEffect(() => {
     let cancelled = false;
+    console.log("[NOTES] Loading for room:", roomId);
     fetch(apiUrl(`/api/notes/room/${roomId}`), { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+      .then(r => {
+        console.log("[NOTES] Load response status:", r.status);
+        return r.json();
+      })
       .then(data => {
+        console.log("[NOTES] Load response data:", data);
         if (cancelled) return;
         const html = data.content || "";
         if (editorRef.current) editorRef.current.innerHTML = html;
@@ -28,9 +33,13 @@ export default function NotesPanel({ roomId, token }) {
         lastSavedRef.current = html;
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(err => {
+        console.error("[NOTES] Load FAILED:", err);
+        setLoading(false);
+      });
     return () => { cancelled = true; };
   }, [roomId, token]);
+
 
   const getCurrentHtml = () => editorRef.current?.innerHTML ?? liveContentRef.current;
 
