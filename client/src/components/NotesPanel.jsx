@@ -10,27 +10,38 @@ export default function NotesPanel({ roomId, token }) {
   const saveTimerRef = useRef(null);
   const lastSavedRef = useRef("");
   const liveContentRef = useRef("");
+  const pendingContentRef = useRef(null);
 
   const {
     capturing, pendingFrame, captureFullScreen,
     captureForAreaSelect, cropPendingFrame, cancelAreaSelect,
   } = useScreenshotCapture();
 
+  // ── Load notes from server ──────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    fetch(apiUrl(`/api/notes/room/${roomId}`), { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl(`/api/notes/room/${roomId}`), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then(r => r.json())
       .then(data => {
         if (cancelled) return;
         const html = data.content || "";
-        if (editorRef.current) editorRef.current.innerHTML = html;
         liveContentRef.current = html;
         lastSavedRef.current = html;
+        pendingContentRef.current = html; // stash for the mount-effect below
         setLoading(false);
       })
       .catch(() => setLoading(false));
     return () => { cancelled = true; };
   }, [roomId, token]);
+
+  useEffect(() => {
+    if (!loading && editorRef.current && pendingContentRef.current !== null) {
+      editorRef.current.innerHTML = pendingContentRef.current;
+      pendingContentRef.current = null; // consumed — don't reapply on future renders
+    }
+  }, [loading]);
 
   const getCurrentHtml = () => editorRef.current?.innerHTML ?? liveContentRef.current;
 
@@ -78,6 +89,7 @@ export default function NotesPanel({ roomId, token }) {
         }).catch(() => {});
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, token]);
 
   const insertImageAtCursor = (dataUrl) => {
